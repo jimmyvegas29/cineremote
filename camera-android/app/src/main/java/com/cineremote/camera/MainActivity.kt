@@ -152,7 +152,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            if (started) { hud.invalidate(); session?.emitHousekeeping() }
+            if (started) { hud.battery = (batteryPct() * 100).toInt(); hud.invalidate(); session?.emitHousekeeping() }
             ui.postDelayed(this, if (recorder.isRecording) 200 else 1000)
         }
     }

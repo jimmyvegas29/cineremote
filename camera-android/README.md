@@ -15,10 +15,10 @@ like any other camera — live preview, manual controls, recording.
 - Manual control from CineRemote: lens, frame rate, ISO, shutter, white balance, tint, exposure
   compensation, focus (and tap-to-focus), zoom, stabilization, torch.
 - Recording to `Movies/CineRemote/*.mp4` on the phone, started/stopped from CineRemote.
-- **On-phone camera UI** (Blackmagic-style HUD): live preview with a top status row (format, timecode,
-  battery, storage), lens chips (ultra-wide / wide / tele / front), tappable tiles for FPS, shutter, ISO,
-  white balance, tint, focus and zoom (each with a value ruler and an AUTO toggle), tap-to-focus, and a
-  record button. Name / letter / password are in **Settings** (the ⚙ top-right).
+- **On-phone camera UI** (Blackmagic-style HUD): a thin top row of small readouts (LENS · FPS · SHUTTER ·
+  timecode · ISO · WB · TINT · EV · FOCUS · ZOOM · battery), a compact record button on the right rail,
+  and a settings gear. Tap a readout to edit it with a slide-up value wheel (with an AUTO toggle); tap the
+  picture to focus. Name / letter / password are in Settings.
 
 Verified on a Samsung Galaxy S20 FE (Android 13) against CineRemote on Windows.
 
