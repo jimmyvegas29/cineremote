@@ -1,0 +1,27 @@
+// CineRemote - camera app remote-control protocol, as used by this project.
+// Written for interoperability with the Blackmagic Camera app's "Remote Camera" mode (protocol 5.0).
+// Field numbers must match the app; names are this project's. Not affiliated with Blackmagic Design.
+// Compile with tools/gen_proto.py (produces schema.pb, which the app loads at runtime).
+syntax = "proto3";
+package cineremote.camctl.v5;
+
+
+message FrameRate {
+  uint32 num = 1;
+  uint32 den = 2;
+}
+
+message Shutter {
+  uint32 num = 1;
+  uint32 den = 2;
+}
+
+message PointF {
+  float x = 1;
+  float y = 2;
+}
+
+message TimeCode {
+  uint32 seconds = 1;
+  uint32 frame_count = 2;
+}

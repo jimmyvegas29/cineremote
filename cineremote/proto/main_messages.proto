@@ -1,0 +1,273 @@
+// CineRemote - camera app remote-control protocol, as used by this project.
+// Written for interoperability with the Blackmagic Camera app's "Remote Camera" mode (protocol 5.0).
+// Field numbers must match the app; names are this project's. Not affiliated with Blackmagic Design.
+// Compile with tools/gen_proto.py (produces schema.pb, which the app loads at runtime).
+syntax = "proto3";
+package cineremote.camctl.v5;
+
+import "camera_control.proto";
+import "common.proto";
+import "settings.proto";
+
+enum VideoCodec {
+  VIDEO_CODEC_UNSPECIFIED = 0;
+  VIDEO_CODEC_H264 = 1;
+  VIDEO_CODEC_H265_MAIN = 2;
+  VIDEO_CODEC_H265_MAIN_10 = 3;
+  VIDEO_CODEC_H265_MAIN_422_10 = 4;
+}
+
+enum WritePropertyStatus {
+  WRITE_PROPERTY_STATUS_UNSPECIFIED = 0;
+  WRITE_PROPERTY_STATUS_OK = 1;
+  WRITE_PROPERTY_STATUS_ERROR_INVALID_VALUE = 2;
+  WRITE_PROPERTY_STATUS_ERROR_READ_ONLY = 3;
+  WRITE_PROPERTY_STATUS_WARNING = 4;
+  WRITE_PROPERTY_STATUS_REQUIRES_CONFIRM = 5;
+}
+
+enum StartPreviewStatus {
+  START_PREVIEW_STATUS_UNSPECIFIED = 0;
+  START_PREVIEW_STATUS_OKAY = 1;
+  START_PREVIEW_STATUS_FAILED = 2;
+}
+
+enum StartRecordingStatus {
+  START_RECORDING_STATUS_UNSPECIFIED = 0;
+  START_RECORDING_STATUS_OKAY = 1;
+  START_RECORDING_STATUS_FAILED = 2;
+  START_RECORDING_STATUS_FAILED_STORAGE_IS_FULL = 3;
+}
+
+enum StopRecordingStatus {
+  STOP_RECORDING_STATUS_UNSPECIFIED = 0;
+  STOP_RECORDING_STATUS_OKAY = 1;
+  STOP_RECORDING_STATUS_FAILED = 2;
+}
+
+enum PauseRecordingStatus {
+  PAUSE_RECORDING_STATUS_UNSPECIFIED = 0;
+  PAUSE_RECORDING_STATUS_OKAY = 1;
+  PAUSE_RECORDING_STATUS_FAILED = 2;
+}
+
+enum StartSettingsEditStatus {
+  START_SETTINGS_EDIT_STATUS_UNSPECIFIED = 0;
+  START_SETTINGS_EDIT_STATUS_OKAY = 1;
+  START_SETTINGS_EDIT_STATUS_REJECTED = 2;
+}
+
+enum WriteSettingStatus {
+  WRITE_SETTING_STATUS_UNSPECIFIED = 0;
+  WRITE_SETTING_STATUS_OKAY = 1;
+  WRITE_SETTING_STATUS_FAILED = 2;
+  WRITE_SETTING_STATUS_REQUIRES_CONFIRM = 3;
+  WRITE_SETTING_STATUS_WAITING_CONFIRM = 4;
+}
+
+enum ErrorEventType {
+  ERROR_EVENT_TYPE_UNSPECIFIED = 0;
+  ERROR_EVENT_TYPE_TEMP_TOO_HIGH = 1;
+  ERROR_EVENT_TYPE_STORAGE_FULL = 2;
+  ERROR_EVENT_TYPE_BATTERY_LOW = 3;
+  ERROR_EVENT_TYPE_EXT_DRIVE_DISCONNECTED = 4;
+  ERROR_EVENT_TYPE_UPLOAD_FAILED = 5;
+  ERROR_EVENT_TYPE_AUDIO_SOURCE_UNAVAILABLE = 6;
+  ERROR_EVENT_TYPE_RECORDING_STOPPED = 7;
+  ERROR_EVENT_TYPE_RECORDING_STOPPED_APP_LOST_FOCUS = 8;
+  ERROR_EVENT_TYPE_RECORDING_STOPPED_DROPPED_FRAMES = 9;
+  ERROR_EVENT_TYPE_RECORDING_STOPPED_STORAGE_FULL = 10;
+  ERROR_EVENT_TYPE_RECORDING_STOPPED_REQUIRES_EXTERNAL_STORAGE = 11;
+}
+
+message HelloRequest {
+  cineremote.camctl.v5.AppInfo app_info = 1;
+}
+
+message HelloResponse {
+  cineremote.camctl.v5.AppInfo app_info = 1;
+  repeated cineremote.camctl.v5.VideoCodec encoding_video_codecs = 2;
+}
+
+message ReadPropertyRequest {
+  cineremote.camctl.v5.PropertyId property_id = 1;
+}
+
+message ReadPropertyResponse {
+  cineremote.camctl.v5.Property property = 1;
+}
+
+message WritePropertyRequest {
+  cineremote.camctl.v5.Property property = 1;
+  bool override_confirm = 2;
+}
+
+message WritePropertyResponse {
+  cineremote.camctl.v5.WritePropertyStatus status = 1;
+  optional cineremote.camctl.v5.Property requested_value = 2;
+  optional string confirmation_message = 3;
+  optional cineremote.camctl.v5.Property current_value = 4;
+}
+
+message PropertyChangedEvent {
+  cineremote.camctl.v5.Property property = 1;
+}
+
+message StartPreviewRequest {
+  cineremote.camctl.v5.VideoCodec video_codec = 1;
+  optional cineremote.camctl.v5.FrameRate frame_rate = 2;
+  uint32 audio_num_channels_to_stream = 3;
+}
+
+message StartPreviewResponse {
+  cineremote.camctl.v5.StartPreviewStatus status = 1;
+}
+
+message StopPreviewRequest {
+}
+
+message StopPreviewResponse {
+}
+
+message StartRecordingRequest {
+  bool dim_screen = 1;
+}
+
+message StartRecordingResponse {
+  cineremote.camctl.v5.StartRecordingStatus status = 1;
+}
+
+message StopRecordingRequest {
+}
+
+message StopRecordingResponse {
+  cineremote.camctl.v5.StopRecordingStatus status = 1;
+}
+
+message PauseRecordingRequest {
+}
+
+message PauseRecordingResponse {
+  cineremote.camctl.v5.PauseRecordingStatus status = 1;
+}
+
+message FramesDroppedEvent {
+  optional uint64 count = 1;
+}
+
+message StartSettingsEditRequest {
+}
+
+message StartSettingsEditResponse {
+  cineremote.camctl.v5.StartSettingsEditStatus status = 1;
+  cineremote.camctl.v5.AvailableSettings available_settings = 2;
+}
+
+message WriteSettingsRequest {
+  repeated cineremote.camctl.v5.WriteSetting settings = 1;
+  bool is_done_editing = 2;
+}
+
+message WriteSettingsResponse {
+  repeated cineremote.camctl.v5.WriteSettingStatus status = 1;
+  optional string confirmation_message = 2;
+}
+
+message ConfirmWriteSettingsRequest {
+  bool yes = 1;
+}
+
+message ConfirmWriteSettingsResponse {
+  repeated cineremote.camctl.v5.AvailableSettings available_settings = 1;
+}
+
+message SettingsChangedEvent {
+  cineremote.camctl.v5.AvailableSettings available_settings = 1;
+}
+
+message DisconnectEvent {
+}
+
+message IdentifyCamRequest {
+}
+
+message IdentifyCamResponse {
+}
+
+message HeartBeatRequest {
+}
+
+message HeartBeatResponse {
+}
+
+message WebRtcSdpRequest {
+  string data = 1;
+}
+
+message WebRtcSdpResponse {
+  string data = 1;
+}
+
+message ErrorEvent {
+  cineremote.camctl.v5.ErrorEventType error_type = 1;
+}
+
+message ControllerMessage {
+  uint64 message_id = 1;
+  optional uint64 subordinate_message_id = 2;
+  oneof message {
+    cineremote.camctl.v5.HelloRequest hello_request = 3;
+    cineremote.camctl.v5.DisconnectEvent disconnect_event = 4;
+    cineremote.camctl.v5.ReadPropertyRequest read_property_request = 5;
+    cineremote.camctl.v5.WritePropertyRequest write_property_request = 6;
+    cineremote.camctl.v5.StartPreviewRequest start_preview_request = 7;
+    cineremote.camctl.v5.StopPreviewRequest stop_preview_request = 8;
+    cineremote.camctl.v5.StartRecordingRequest start_recording_request = 9;
+    cineremote.camctl.v5.StopRecordingRequest stop_recording_request = 10;
+    cineremote.camctl.v5.HeartBeatRequest heart_beat_request = 11;
+    cineremote.camctl.v5.HeartBeatResponse heart_beat_response = 12;
+    cineremote.camctl.v5.WebRtcSdpRequest webrtc_sdp_request = 13;
+    cineremote.camctl.v5.WebRtcSdpResponse webrtc_sdp_response = 14;
+    cineremote.camctl.v5.StartSettingsEditRequest start_settings_edit_request = 15;
+    cineremote.camctl.v5.IdentifyCamRequest identify_request = 16;
+    cineremote.camctl.v5.WriteSettingsRequest write_settings_request = 17;
+    cineremote.camctl.v5.ConfirmWriteSettingsRequest confirm_write_settings_request = 18;
+    cineremote.camctl.v5.PauseRecordingRequest pause_recording_request = 19;
+  }
+}
+
+message SubordinateMessage {
+  uint64 message_id = 1;
+  optional uint64 controller_message_id = 2;
+  oneof message {
+    cineremote.camctl.v5.HelloResponse hello_response = 3;
+    cineremote.camctl.v5.DisconnectEvent disconnect_event = 4;
+    cineremote.camctl.v5.ErrorEvent error_event = 5;
+    cineremote.camctl.v5.ReadPropertyResponse read_property_response = 6;
+    cineremote.camctl.v5.WritePropertyResponse write_property_response = 7;
+    cineremote.camctl.v5.PropertyChangedEvent property_changed_event = 8;
+    cineremote.camctl.v5.StartPreviewResponse start_preview_response = 9;
+    cineremote.camctl.v5.StopPreviewResponse stop_preview_response = 10;
+    cineremote.camctl.v5.StartRecordingResponse start_recording_response = 11;
+    cineremote.camctl.v5.StopRecordingResponse stop_recording_response = 12;
+    cineremote.camctl.v5.HeartBeatRequest heart_beat_request = 13;
+    cineremote.camctl.v5.HeartBeatResponse heart_beat_response = 14;
+    cineremote.camctl.v5.WebRtcSdpRequest webrtc_sdp_request = 15;
+    cineremote.camctl.v5.WebRtcSdpResponse webrtc_sdp_response = 16;
+    cineremote.camctl.v5.StartSettingsEditResponse start_settings_edit_response = 17;
+    cineremote.camctl.v5.FramesDroppedEvent frames_dropped_event = 18;
+    cineremote.camctl.v5.IdentifyCamResponse identify_response = 19;
+    cineremote.camctl.v5.WriteSettingsResponse write_settings_response = 20;
+    cineremote.camctl.v5.ConfirmWriteSettingsResponse confirm_write_settings_response = 21;
+    cineremote.camctl.v5.SettingsChangedEvent settings_changed_event = 22;
+    cineremote.camctl.v5.PauseRecordingResponse pause_recording_response = 23;
+  }
+}
+
+message ControllerMessages {
+  repeated cineremote.camctl.v5.ControllerMessage messages = 1;
+}
+
+message SubordinateMessages {
+  repeated cineremote.camctl.v5.SubordinateMessage messages = 1;
+}

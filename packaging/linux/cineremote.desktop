@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CineRemote
+GenericName=Camera remote control
+Comment=Remote control and live monitoring for the Blackmagic Camera app on iPhone and Android
+Exec=CineRemote %U
+Icon=cineremote
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=Blackmagic;camera;remote;OBS;monitor;multicam;

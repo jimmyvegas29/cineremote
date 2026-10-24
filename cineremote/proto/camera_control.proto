@@ -1,0 +1,535 @@
+// CineRemote - camera app remote-control protocol, as used by this project.
+// Written for interoperability with the Blackmagic Camera app's "Remote Camera" mode (protocol 5.0).
+// Field numbers must match the app; names are this project's. Not affiliated with Blackmagic Design.
+// Compile with tools/gen_proto.py (produces schema.pb, which the app loads at runtime).
+syntax = "proto3";
+package cineremote.camctl.v5;
+
+import "common.proto";
+
+enum AppPlatform {
+  APP_PLATFORM_UNSPECIFIED = 0;
+  APP_PLATFORM_IOS = 1;
+  APP_PLATFORM_ANDROID = 2;
+}
+
+enum LensType {
+  LENS_TYPE_UNSPECIFIED = 0;
+  LENS_TYPE_BACK_WIDE = 1;
+  LENS_TYPE_BACK_MAIN = 2;
+  LENS_TYPE_BACK_TELE = 3;
+  LENS_TYPE_FRONT_MAIN = 4;
+  LENS_TYPE_BACK_WIDE_SECONDARY = 5;
+  LENS_TYPE_BACK_TELE_SECONDARY = 6;
+  LENS_TYPE_FRONT_WIDE = 7;
+}
+
+enum PropertyId {
+  PROPERTY_ID_UNSPECIFIED = 0;
+  PROPERTY_ID_SLATE = 2;
+  PROPERTY_ID_BATTERY = 3;
+  PROPERTY_ID_ACTIVE_STORAGE = 4;
+  PROPERTY_ID_ACTIVE_CAM = 5;
+  PROPERTY_ID_CAM_FRAMERATE = 6;
+  PROPERTY_ID_CAM_SHUTTER = 7;
+  PROPERTY_ID_CAM_SENSIBILITY = 8;
+  PROPERTY_ID_CAM_EXPOSURE_COMP = 9;
+  PROPERTY_ID_CAM_WHITE_BALANCE = 10;
+  PROPERTY_ID_CAM_TINT = 11;
+  PROPERTY_ID_CAM_FOCUS = 12;
+  PROPERTY_ID_CAM_ZOOM = 13;
+  PROPERTY_ID_CAM_POINT_OF_INTEREST = 14;
+  PROPERTY_ID_CAM_ORIENTATION = 15;
+  PROPERTY_ID_CAM_STABILIZATION = 16;
+  PROPERTY_ID_CAM_FOCUS_MARKERS = 17;
+  PROPERTY_ID_RECORDING_STATE = 18;
+  PROPERTY_ID_RECORDING_FORMAT = 19;
+  PROPERTY_ID_STATE = 20;
+  PROPERTY_ID_CLOUD_STATE = 21;
+  PROPERTY_ID_AVAILABLE_CAMS = 22;
+  PROPERTY_ID_PREVIEW_VISIBILITY = 23;
+  PROPERTY_ID_AUDIO_SOURCE = 24;
+  PROPERTY_ID_CAM_WHITE_BALANCE_RANGE = 25;
+  PROPERTY_ID_CAM_TINT_RANGE = 26;
+  PROPERTY_ID_CAM_SENSIBILITY_RANGE = 27;
+  PROPERTY_ID_CAM_FRAME_RATE_RANGE = 28;
+  PROPERTY_ID_CAM_SHUTTER_RANGE = 29;
+  PROPERTY_ID_CAM_EXPOSURE_COMP_RANGE = 30;
+  PROPERTY_ID_CAM_APERTURE_VALUES = 31;
+  PROPERTY_ID_CAM_STABILIZATION_VALUES = 32;
+  PROPERTY_ID_CAM_APERTURE = 33;
+  PROPERTY_ID_CAM_FOCUS_RANGE = 34;
+  PROPERTY_ID_AVAILABLE_SETTINGS_PRESETS = 35;
+  PROPERTY_ID_SETTINGS_PRESET = 36;
+  PROPERTY_ID_CAM_ZOOM_TRANSITION = 37;
+  PROPERTY_ID_AVAILABLE_AUTO_EXPOSURE_PREFERENCES = 38;
+  PROPERTY_ID_CAM_AUTO_EXPOSURE_PREFERENCE = 39;
+  PROPERTY_ID_CAM_LIGHT = 40;
+  PROPERTY_ID_AVAILABLE_LUTS = 41;
+  PROPERTY_ID_LUT = 42;
+  PROPERTY_ID_CONTINUOUS_RECORDING = 43;
+  PROPERTY_ID_FLICKER_FREE_SHUTTER = 44;
+}
+
+enum TimelapseIntervalType {
+  TIMELAPSE_INTERVAL_TYPE_UNSPECIFIED = 0;
+  TIMELAPSE_INTERVAL_TYPE_FRAMES = 1;
+  TIMELAPSE_INTERVAL_TYPE_SECONDS = 2;
+  TIMELAPSE_INTERVAL_TYPE_MINUTES = 3;
+}
+
+enum MeteringMode {
+  METERING_MODE_UNSPECIFIED = 0;
+  METERING_MODE_AUTO = 1;
+  METERING_MODE_MANUAL = 2;
+  METERING_MODE_LOCKED = 3;
+}
+
+enum FocusMarkerTransitionMode {
+  FOCUS_MARKER_TRANSITION_MODE_UNSPECIFIED = 0;
+  FOCUS_MARKER_TRANSITION_MODE_BOUNCE = 1;
+  FOCUS_MARKER_TRANSITION_MODE_CYCLE = 2;
+}
+
+enum PointOfInterestType {
+  CAM_POE_TYPE_UNSPECIFIED = 0;
+  CAM_POE_TYPE_SINGLE_SHOT_AUTO_EXPOSURE = 1;
+  CAM_POE_TYPE_SINGLE_SHOT_AUTO_FOCUS = 2;
+  CAM_POE_TYPE_SINGLE_SHOT_AE_AF = 3;
+  CAM_POE_TYPE_LOCK_AE_AF = 4;
+  CAM_POE_TYPE_LOCK_WHITE_BALANCE = 5;
+}
+
+enum StabilizationLevel {
+  STABILIZATION_LEVEL_UNSPECIFIED = 0;
+  STABILIZATION_LEVEL_OFF = 1;
+  STABILIZATION_LEVEL_STANDARD = 2;
+  STABILIZATION_LEVEL_CINEMATIC = 3;
+  STABILIZATION_LEVEL_EXTREME = 4;
+  STABILIZATION_LEVEL_OPTICAL = 5;
+}
+
+enum SlateLight {
+  SLATE_LIGHT_UNSPECIFIED = 0;
+  SLATE_LIGHT_INTERIOR = 1;
+  SLATE_LIGHT_EXTERIOR = 2;
+}
+
+enum SlateTimeOfDay {
+  SLATE_TIME_OF_DAY_UNSPECIFIED = 0;
+  SLATE_TIME_OF_DAY_DAY = 1;
+  SLATE_TIME_OF_DAY_NIGHT = 2;
+}
+
+enum CamOrientation {
+  CAM_ORIENTATION_UNSPECIFIED = 0;
+  CAM_ORIENTATION_PORTRAIT = 1;
+  CAM_ORIENTATION_PORTRAIT_REVERSED = 2;
+  CAM_ORIENTATION_LANDSCAPE = 3;
+  CAM_ORIENTATION_LANDSCAPE_REVERSED = 4;
+}
+
+enum TimeCodeMode {
+  TIME_CODE_MODE_UNSPECIFIED = 0;
+  TIME_CODE_MODE_RECORD_RUN = 1;
+  TIME_CODE_MODE_TIME_OF_DAY = 2;
+  TIME_CODE_MODE_TENTACLE_SYNC = 3;
+  TIME_CODE_MODE_PRO_DOCK = 4;
+}
+
+enum ColorSpace {
+  COLOR_SPACE_UNSPECIFIED = 0;
+  COLOR_SPACE_REC709 = 1;
+  COLOR_SPACE_REC2020 = 2;
+  COLOR_SPACE_P3_D65 = 3;
+  COLOR_SPACE_APPLE_LOG = 4;
+  COLOR_SPACE_REC2020_HLG = 5;
+  COLOR_SPACE_REC2020_HDR10_PLUS = 6;
+  COLOR_SPACE_APPLE_LOG2 = 7;
+  COLOR_SPACE_HDR10 = 8;
+  COLOR_SPACE_DOLBY_VISION_PQ = 9;
+  COLOR_SPACE_DOLBY_VISION_HLG = 10;
+}
+
+enum ControlMode {
+  CONTROL_MODE_UNSPECIFIED = 0;
+  CONTROL_MODE_MONITOR_ONLY = 1;
+  CONTROL_MODE_FULL_CONTROL = 2;
+}
+
+enum PreviewVisibility {
+  PREVIEW_VISIBILITY_UNSPECIFIED = 0;
+  PREVIEW_VISIBILITY_FEATURED = 1;
+  PREVIEW_VISIBILITY_NEXT_TO_FEATURED = 2;
+  PREVIEW_VISIBILITY_MULTIVIEW = 3;
+  PREVIEW_VISIBILITY_HIDDEN = 4;
+}
+
+enum SettingsPresetAction {
+  SETTINGS_PRESET_ACTION_UNSPECIFIED = 0;
+  SETTINGS_PRESET_ACTION_CREATE = 1;
+  SETTINGS_PRESET_ACTION_SELECT = 2;
+  SETTINGS_PRESET_ACTION_UPDATE = 3;
+  SETTINGS_PRESET_ACTION_EDIT = 4;
+  SETTINGS_PRESET_ACTION_DELETE = 5;
+}
+
+enum AutoExposurePreference {
+  AUTO_EXPOSURE_PREFERENCE_UNSPECIFIED = 0;
+  AUTO_EXPOSURE_PREFERENCE_SHUTTER = 1;
+  AUTO_EXPOSURE_PREFERENCE_ISO = 2;
+  AUTO_EXPOSURE_PREFERENCE_SHUTTER_AND_ISO = 3;
+}
+
+message AppInfo {
+  string name = 1;
+  string version = 2;
+  cineremote.camctl.v5.AppPlatform platform = 3;
+  string platform_version = 4;
+  string device_model_name = 5;
+  string language_code = 6;
+  optional cineremote.camctl.v5.DebugInfo debug_info = 7;
+}
+
+message DebugInfo {
+  repeated string debug_tags = 1;
+  bool is_heartbeat_disabled = 2;
+}
+
+message Camera {
+  string id = 1;
+  cineremote.camctl.v5.Lens lens = 2;
+  bool is_disabled = 13;
+  uint32 white_balance_kelvin_min = 3;
+  uint32 white_balance_kelvin_max = 4;
+  int32 tint_min = 5;
+  int32 tint_max = 6;
+  uint32 sensibility_iso_min = 7;
+  uint32 sensibility_iso_max = 8;
+  cineremote.camctl.v5.FrameRate frame_rate_min = 9;
+  cineremote.camctl.v5.FrameRate frame_rate_max = 10;
+  cineremote.camctl.v5.Shutter shutter_min = 11;
+  cineremote.camctl.v5.Shutter shutter_max = 12;
+}
+
+message Lens {
+  cineremote.camctl.v5.LensType type = 1;
+  optional uint32 focal_length_mm = 2;
+  optional float optical_zoom_factor = 3;
+  optional float max_aperture = 4;
+  float zoom_min = 5;
+  float zoom_max = 6;
+  bool is_light_supported = 7;
+  int32 light_max_strength_supported = 8;
+  bool is_light_auto_supported = 9;
+  bool is_unavailable = 10;
+}
+
+message Property {
+  cineremote.camctl.v5.PropertyId id = 1;
+  oneof value {
+    cineremote.camctl.v5.SlateProperty slate = 2;
+    cineremote.camctl.v5.BatteryProperty battery = 3;
+    cineremote.camctl.v5.ActiveStorageProperty active_storage = 4;
+    cineremote.camctl.v5.ActiveCamProperty active_cam = 5;
+    cineremote.camctl.v5.CamFramerateProperty cam_framerate = 6;
+    cineremote.camctl.v5.CamShutterProperty cam_shutter = 7;
+    cineremote.camctl.v5.CamSensibilityProperty cam_sensibility = 8;
+    cineremote.camctl.v5.CamExposureCompProperty cam_exposure_comp = 9;
+    cineremote.camctl.v5.CamWhiteBalanceProperty cam_white_balance = 10;
+    cineremote.camctl.v5.CamTintProperty cam_tint = 11;
+    cineremote.camctl.v5.CamFocusProperty cam_focus = 12;
+    cineremote.camctl.v5.CamZoomProperty cam_zoom = 13;
+    cineremote.camctl.v5.CamPointOfInterestProperty cam_point_of_interest = 14;
+    cineremote.camctl.v5.CamOrientationProperty cam_orientation = 15;
+    cineremote.camctl.v5.CamStabilizationProperty cam_stabilization = 16;
+    cineremote.camctl.v5.CamFocusMarkersProperty cam_focus_markers = 17;
+    cineremote.camctl.v5.RecordingStateProperty recording_state = 18;
+    cineremote.camctl.v5.CamRecordingFormatProperty recording_format = 19;
+    cineremote.camctl.v5.StateProperty state = 20;
+    cineremote.camctl.v5.CloudStateProperty cloud_state = 21;
+    cineremote.camctl.v5.AvailableCamsProperty available_cams = 22;
+    cineremote.camctl.v5.PreviewVisibilityProperty preview_visibility = 23;
+    cineremote.camctl.v5.AudioSourceProperty audio_source = 24;
+    cineremote.camctl.v5.CamWhiteBalanceRangeProperty cam_white_balance_range = 25;
+    cineremote.camctl.v5.CamTintRangeProperty cam_tint_range = 26;
+    cineremote.camctl.v5.CamSensibilityRangeProperty cam_sensibility_range = 27;
+    cineremote.camctl.v5.CamFrameRateRangeProperty cam_frame_rate_range = 28;
+    cineremote.camctl.v5.CamShutterRangeProperty cam_shutter_range = 29;
+    cineremote.camctl.v5.CamExposureCompRangeProperty cam_exposure_comp_range = 30;
+    cineremote.camctl.v5.CamApertureValuesProperty cam_aperture_values = 31;
+    cineremote.camctl.v5.CamStabilizationValuesProperty cam_stabilization_values = 32;
+    cineremote.camctl.v5.CamApertureProperty cam_aperture = 33;
+    cineremote.camctl.v5.CamFocusRangeProperty cam_focus_range = 34;
+    cineremote.camctl.v5.AvailableSettingsPresetsProperty available_settings_presets = 35;
+    cineremote.camctl.v5.SettingsPresetProperty settings_preset = 36;
+    cineremote.camctl.v5.CamZoomTransitionProperty cam_zoom_transition = 37;
+    cineremote.camctl.v5.AvailableAutoExposurePreferencesProperty available_auto_exposure_preferences = 38;
+    cineremote.camctl.v5.CamAutoExposurePreferenceProperty cam_auto_exposure_preference = 39;
+    cineremote.camctl.v5.CamLightProperty cam_light = 40;
+    cineremote.camctl.v5.AvailableLutsProperty available_luts = 41;
+    cineremote.camctl.v5.LutProperty lut = 42;
+    cineremote.camctl.v5.ContinuousRecordingProperty continuous_recording = 43;
+    cineremote.camctl.v5.CamFlickerFreeShutter flicker_free_shutter = 44;
+  }
+}
+
+message BatteryProperty {
+  float available_percentage = 1;
+}
+
+message ActiveStorageProperty {
+  cineremote.camctl.v5.StorageDevice storage_device = 1;
+}
+
+message StorageDevice {
+  string name = 1;
+  bool is_internal = 2;
+  uint64 total_size_bytes = 3;
+  uint64 free_size_bytes = 4;
+  uint64 runtime_secs = 5;
+}
+
+message ActiveCamProperty {
+  string camera_id = 1;
+  bool is_auto = 2;
+  bool is_disabled = 3;
+}
+
+message TimelapseInterval {
+  cineremote.camctl.v5.TimelapseIntervalType type = 1;
+  int32 count = 2;
+}
+
+message CamFramerateProperty {
+  cineremote.camctl.v5.FrameRate playback_frame_rate = 1;
+  bool is_off_speed_enabled = 2;
+  cineremote.camctl.v5.FrameRate off_speed_frame_rate = 3;
+  bool is_timelapse_recording = 4;
+  optional cineremote.camctl.v5.TimelapseInterval timelapse_interval = 5;
+  bool keep_unlock = 6;
+}
+
+message CamShutterProperty {
+  cineremote.camctl.v5.MeteringMode metering_mode = 1;
+  optional cineremote.camctl.v5.Shutter shutter_speed = 2;
+  optional float shutter_angle = 3;
+}
+
+message CamFlickerFreeShutter {
+  uint32 flicker = 1;
+}
+
+message CamSensibilityProperty {
+  cineremote.camctl.v5.MeteringMode metering_mode = 1;
+  optional uint32 sensibility_iso = 2;
+}
+
+message CamExposureCompProperty {
+  cineremote.camctl.v5.MeteringMode metering_mode = 1;
+  optional float exposure_comp_stops = 2;
+  bool is_exposure_bias_enabled = 3;
+}
+
+message CamWhiteBalanceProperty {
+  cineremote.camctl.v5.MeteringMode metering_mode = 1;
+  optional uint32 white_balance_kelvin = 2;
+  bool is_disabled = 3;
+}
+
+message CamTintProperty {
+  cineremote.camctl.v5.MeteringMode metering_mode = 1;
+  optional int32 tint = 2;
+}
+
+message CamFocusProperty {
+  bool is_auto = 1;
+  optional float focus_value = 2;
+  optional bool is_transitioning = 3;
+  optional bool is_locked = 4;
+}
+
+message CamFocusMarkersProperty {
+  optional float transition_time_secs = 1;
+  optional float marker_1 = 2;
+  optional float marker_2 = 3;
+  optional float marker_3 = 4;
+  optional cineremote.camctl.v5.FocusMarkerTransitionMode transition_mode = 5;
+}
+
+message CamZoomProperty {
+  float zoom_factor = 1;
+  bool is_disabled = 2;
+}
+
+message CamZoomTransitionProperty {
+  optional float transition_time_secs = 1;
+}
+
+message CamPointOfInterestProperty {
+  cineremote.camctl.v5.PointOfInterestType type = 1;
+  optional cineremote.camctl.v5.PointF point = 2;
+}
+
+message CamStabilizationProperty {
+  cineremote.camctl.v5.StabilizationLevel level = 1;
+  bool is_disabled = 2;
+}
+
+message SlateProperty {
+  optional uint32 reel = 1;
+  optional string scene = 2;
+  optional uint32 take = 3;
+  optional cineremote.camctl.v5.SlateLight light = 4;
+  optional cineremote.camctl.v5.SlateTimeOfDay time_of_day = 5;
+  optional bool is_good_take_last_clip = 6;
+  optional string production_name = 7;
+  optional string director = 8;
+  optional string camera_operator = 9;
+  optional bool is_take_auto_increment_enabled = 10;
+}
+
+message CamOrientationProperty {
+  cineremote.camctl.v5.CamOrientation orientation = 1;
+  bool is_vertical_video_enabled = 2;
+}
+
+message RecordingStateProperty {
+  bool is_recording = 1;
+  bool is_writing_to_storage = 2;
+  cineremote.camctl.v5.TimeCodeMode timecode_mode = 3;
+  cineremote.camctl.v5.TimeCode system_timecode = 4;
+  optional cineremote.camctl.v5.TimeCode recorded_duration = 5;
+  optional cineremote.camctl.v5.TimeCode tentacle_sync_timecode = 6;
+  bool is_recording_paused = 7;
+}
+
+message CamRecordingFormatProperty {
+  uint32 width = 1;
+  uint32 height = 2;
+  cineremote.camctl.v5.ColorSpace color_space = 3;
+  bool is_open_gate = 4;
+}
+
+message StateProperty {
+  cineremote.camctl.v5.ControlMode control_mode = 1;
+}
+
+message CloudStateProperty {
+  bool is_cloud_project = 1;
+  optional string project_name = 2;
+  optional string clip_name = 3;
+  optional float upload_progress_percentage = 4;
+  optional float upload_speed_mbps = 5;
+  optional cineremote.camctl.v5.TimeCode upload_time_remaining = 6;
+}
+
+message AvailableCamsProperty {
+  repeated cineremote.camctl.v5.Camera cameras = 1;
+  bool is_auto_supported = 2;
+  bool is_use_external_lens = 3;
+}
+
+message PreviewVisibilityProperty {
+  cineremote.camctl.v5.PreviewVisibility preview_visibility = 1;
+}
+
+message AudioSourceProperty {
+  string active_source_name = 1;
+  uint32 num_of_channels = 2;
+}
+
+message CamWhiteBalanceRangeProperty {
+  string camera_id = 1;
+  uint32 white_balance_kelvin_min = 2;
+  uint32 white_balance_kelvin_max = 3;
+}
+
+message CamTintRangeProperty {
+  string camera_id = 1;
+  int32 tint_min = 2;
+  int32 tint_max = 3;
+}
+
+message CamSensibilityRangeProperty {
+  string camera_id = 1;
+  uint32 sensibility_iso_min = 2;
+  uint32 sensibility_iso_max = 3;
+}
+
+message CamFrameRateRangeProperty {
+  string camera_id = 1;
+  cineremote.camctl.v5.FrameRate frame_rate_min = 2;
+  cineremote.camctl.v5.FrameRate frame_rate_max = 3;
+  repeated cineremote.camctl.v5.FrameRate frame_rate_values = 4;
+}
+
+message CamShutterRangeProperty {
+  string camera_id = 1;
+  cineremote.camctl.v5.Shutter shutter_min = 2;
+  cineremote.camctl.v5.Shutter shutter_max = 3;
+}
+
+message CamExposureCompRangeProperty {
+  string camera_id = 1;
+  float exposure_comp_stops_min = 2;
+  float exposure_comp_stops_max = 3;
+}
+
+message CamApertureValuesProperty {
+  string camera_id = 1;
+  repeated float apertures = 2;
+}
+
+message CamStabilizationValuesProperty {
+  string camera_id = 1;
+  repeated cineremote.camctl.v5.StabilizationLevel stabilization_levels = 2;
+}
+
+message CamApertureProperty {
+  float aperture = 1;
+}
+
+message CamFocusRangeProperty {
+  string camera_id = 1;
+  float focus_min = 2;
+  float focus_max = 3;
+}
+
+message AvailableSettingsPresetsProperty {
+  repeated string available_presets = 1;
+}
+
+message SettingsPresetProperty {
+  string current_preset = 1;
+  optional cineremote.camctl.v5.SettingsPresetAction action = 2;
+  optional string preset_new_name = 3;
+}
+
+message AvailableAutoExposurePreferencesProperty {
+  repeated cineremote.camctl.v5.AutoExposurePreference available_auto_exposure_preferences = 1;
+}
+
+message CamAutoExposurePreferenceProperty {
+  cineremote.camctl.v5.AutoExposurePreference auto_exposure_preference = 1;
+}
+
+message CamLightProperty {
+  bool is_enabled = 1;
+  optional bool is_auto = 2;
+  optional uint32 light_value = 3;
+}
+
+message AvailableLutsProperty {
+  repeated string available_luts = 1;
+}
+
+message LutProperty {
+  string selected_lut = 1;
+  bool is_display_lut = 2;
+  bool is_record_lut = 3;
+}
+
+message ContinuousRecordingProperty {
+  bool is_enabled = 1;
+}

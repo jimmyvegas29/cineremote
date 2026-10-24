@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# build output
+build/
+dist/
+out/
+obs-plugin/third_party/
+*.obj
+*.exp
+*.ilk
+*.pdb
+
+# local
+.vscode/
+.idea/
+.DS_Store
+*.log

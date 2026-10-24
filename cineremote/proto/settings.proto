@@ -1,0 +1,80 @@
+// CineRemote - camera app remote-control protocol, as used by this project.
+// Written for interoperability with the Blackmagic Camera app's "Remote Camera" mode (protocol 5.0).
+// Field numbers must match the app; names are this project's. Not affiliated with Blackmagic Design.
+// Compile with tools/gen_proto.py (produces schema.pb, which the app loads at runtime).
+syntax = "proto3";
+package cineremote.camctl.v5;
+
+
+enum SettingDependentType {
+  COMBO_BOX_DEPENDENT_TYPE_UNSPECIFIED = 0;
+  COMBO_BOX_DEPENDENT_TYPE_DISABLE = 1;
+  COMBO_BOX_DEPENDENT_TYPE_HIDE = 2;
+}
+
+message AvailableSettings {
+  repeated cineremote.camctl.v5.SettingsSection sections = 1;
+}
+
+message SettingsSection {
+  string label = 1;
+  repeated cineremote.camctl.v5.SettingDescription settings_descriptions = 2;
+}
+
+message SettingDescription {
+  string setting_key = 1;
+  string label = 2;
+  bool is_disabled = 3;
+  optional cineremote.camctl.v5.SettingDependentType dependent_type = 4;
+  repeated cineremote.camctl.v5.WriteSetting dependent_settings = 5;
+  oneof setting {
+    cineremote.camctl.v5.ComboBoxSetting combo_box = 6;
+    cineremote.camctl.v5.CheckBoxSetting check_box = 7;
+    cineremote.camctl.v5.LinkLabelSetting link_label = 8;
+    cineremote.camctl.v5.KeyValueLabelSetting key_value_label = 9;
+  }
+}
+
+message ComboBoxSetting {
+  repeated cineremote.camctl.v5.ComboBoxOption options = 1;
+  string selected_option_key = 2;
+  string default_option_key = 3;
+}
+
+message ComboBoxOption {
+  string key = 1;
+  string label = 2;
+  optional cineremote.camctl.v5.SettingDependentType dependent_type = 3;
+  repeated cineremote.camctl.v5.WriteSetting dependent_settings = 4;
+}
+
+message CheckBoxSetting {
+  bool is_set = 1;
+  bool default_is_set = 2;
+}
+
+message LinkLabelSetting {
+  string label = 1;
+  optional string url = 2;
+}
+
+message KeyValueLabelSetting {
+  string key_label = 1;
+  string value_label = 2;
+}
+
+message WriteSetting {
+  string setting_key = 1;
+  oneof value {
+    cineremote.camctl.v5.ComboBoxValue combo_box = 2;
+    cineremote.camctl.v5.CheckBoxValue check_box = 3;
+  }
+}
+
+message ComboBoxValue {
+  string selected_option_key = 1;
+}
+
+message CheckBoxValue {
+  bool is_set = 1;
+}

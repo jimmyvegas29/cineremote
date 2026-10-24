@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- CineRemote app icon: a cinema lens with an iris, a red tally light and remote "signal" arcs. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262a33"/>
+      <stop offset="1" stop-color="#0c0d11"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9edf3"/>
+      <stop offset="0.45" stop-color="#8d96a3"/>
+      <stop offset="1" stop-color="#3a3f48"/>
+    </linearGradient>
+    <linearGradient id="barrel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a3f49"/>
+      <stop offset="1" stop-color="#15171c"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.42" cy="0.38" r="0.75">
+      <stop offset="0" stop-color="#3b6fd8"/>
+      <stop offset="0.35" stop-color="#16274f"/>
+      <stop offset="1" stop-color="#05070c"/>
+    </radialGradient>
+    <radialGradient id="tally" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#ff8a80"/>
+      <stop offset="0.45" stop-color="#ef3b33"/>
+      <stop offset="1" stop-color="#a5150f"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff3b30" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff3b30" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- tile -->
+  <rect x="32" y="32" width="960" height="960" rx="224" fill="url(#bg)"/>
+  <rect x="33.5" y="33.5" width="957" height="957" rx="222.5" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="3"/>
+
+  <!-- signal arcs from the tally light -->
+  <g fill="none" stroke="#2f7cf6" stroke-linecap="round" stroke-width="30">
+    <path d="M 742 168 A 150 150 0 0 1 856 282" stroke-opacity="0.95"/>
+    <path d="M 750 96 A 225 225 0 0 1 928 274" stroke-opacity="0.55"/>
+  </g>
+
+  <!-- lens -->
+  <circle cx="470" cy="560" r="318" fill="#08090c"/>
+  <circle cx="470" cy="560" r="300" fill="url(#rim)"/>
+  <circle cx="470" cy="560" r="272" fill="url(#barrel)"/>
+  <!-- focus ring knurling -->
+  <g stroke="#000" stroke-opacity="0.45" stroke-width="6">
+    <circle cx="470" cy="560" r="246" fill="none" stroke-dasharray="10 14"/>
+  </g>
+  <circle cx="470" cy="560" r="222" fill="#0b0c10" stroke="#5b6270" stroke-width="5"/>
+  <circle cx="470" cy="560" r="196" fill="#111318" stroke="#2c3038" stroke-width="10"/>
+  <circle cx="470" cy="560" r="160" fill="url(#glass)"/>
+
+  <!-- iris blades -->
+  <g stroke="#34436a" stroke-width="4" stroke-linejoin="round">
+    <path d="M 470.0 496.0 L 572.3 437.0 A 160 160 0 0 1 627.7 587.0 L 525.4 528.0 Z" fill="#121726"/>
+    <path d="M 525.4 528.0 L 627.7 587.0 A 160 160 0 0 1 525.4 710.1 L 525.4 592.0 Z" fill="#0c0f18"/>
+    <path d="M 525.4 592.0 L 525.4 710.1 A 160 160 0 0 1 367.7 683.0 L 470.0 624.0 Z" fill="#161c2d"/>
+    <path d="M 470.0 624.0 L 367.7 683.0 A 160 160 0 0 1 312.3 533.0 L 414.6 592.0 Z" fill="#0e121c"/>
+    <path d="M 414.6 592.0 L 312.3 533.0 A 160 160 0 0 1 414.6 409.9 L 414.6 528.0 Z" fill="#131929"/>
+    <path d="M 414.6 528.0 L 414.6 409.9 A 160 160 0 0 1 572.3 437.0 L 470.0 496.0 Z" fill="#0b0e16"/>
+  </g>
+  <!-- aperture opening -->
+  <polygon points="470,496 525,528 525,592 470,624 415,592 415,528" fill="url(#glass)" stroke="#4d7ff0" stroke-opacity="0.7" stroke-width="4"/>
+  <!-- glass reflections -->
+  <path d="M 362 470 A 150 150 0 0 1 452 412" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="545" cy="655" r="14" fill="#ffffff" fill-opacity="0.22"/>
+
+  <!-- tally light -->
+  <circle cx="760" cy="262" r="150" fill="url(#glow)"/>
+  <circle cx="760" cy="262" r="74" fill="#2a0806"/>
+  <circle cx="760" cy="262" r="64" fill="url(#tally)"/>
+  <ellipse cx="740" cy="238" rx="24" ry="15" fill="#ffffff" fill-opacity="0.55"/>
+</svg>

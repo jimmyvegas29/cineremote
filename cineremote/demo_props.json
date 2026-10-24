@@ -1,0 +1,562 @@
+{
+ "settings_preset": {},
+ "available_settings_presets": {},
+ "active_storage": {
+  "storage_device": {
+   "is_internal": true,
+   "total_size_bytes": "117332594688",
+   "free_size_bytes": "93211430912",
+   "runtime_secs": "12375"
+  }
+ },
+ "cloud_state": {},
+ "lut": {},
+ "battery": {
+  "available_percentage": 1.0
+ },
+ "available_luts": {
+  "available_luts": [
+   "Cinema Teal",
+   "Day Night",
+   "Dusty",
+   "Monochrome",
+   "Nature",
+   "Nostalgic",
+   "Paloma",
+   "Rift",
+   "Vivid",
+   "Warm Fade"
+  ]
+ },
+ "cam_frame_rate_range": {
+  "camera_id": "Lens25mm",
+  "frame_rate_min": {
+   "num": 15,
+   "den": 1
+  },
+  "frame_rate_max": {
+   "num": 60,
+   "den": 1
+  },
+  "frame_rate_values": [
+   {
+    "num": 15,
+    "den": 1
+   },
+   {
+    "num": 16,
+    "den": 1
+   },
+   {
+    "num": 17,
+    "den": 1
+   },
+   {
+    "num": 18,
+    "den": 1
+   },
+   {
+    "num": 19,
+    "den": 1
+   },
+   {
+    "num": 20,
+    "den": 1
+   },
+   {
+    "num": 21,
+    "den": 1
+   },
+   {
+    "num": 22,
+    "den": 1
+   },
+   {
+    "num": 23,
+    "den": 1
+   },
+   {
+    "num": 24,
+    "den": 1
+   },
+   {
+    "num": 25,
+    "den": 1
+   },
+   {
+    "num": 26,
+    "den": 1
+   },
+   {
+    "num": 27,
+    "den": 1
+   },
+   {
+    "num": 28,
+    "den": 1
+   },
+   {
+    "num": 29,
+    "den": 1
+   },
+   {
+    "num": 30,
+    "den": 1
+   },
+   {
+    "num": 31,
+    "den": 1
+   },
+   {
+    "num": 32,
+    "den": 1
+   },
+   {
+    "num": 33,
+    "den": 1
+   },
+   {
+    "num": 34,
+    "den": 1
+   },
+   {
+    "num": 35,
+    "den": 1
+   },
+   {
+    "num": 36,
+    "den": 1
+   },
+   {
+    "num": 37,
+    "den": 1
+   },
+   {
+    "num": 38,
+    "den": 1
+   },
+   {
+    "num": 39,
+    "den": 1
+   },
+   {
+    "num": 40,
+    "den": 1
+   },
+   {
+    "num": 41,
+    "den": 1
+   },
+   {
+    "num": 42,
+    "den": 1
+   },
+   {
+    "num": 43,
+    "den": 1
+   },
+   {
+    "num": 44,
+    "den": 1
+   },
+   {
+    "num": 45,
+    "den": 1
+   },
+   {
+    "num": 46,
+    "den": 1
+   },
+   {
+    "num": 47,
+    "den": 1
+   },
+   {
+    "num": 48,
+    "den": 1
+   },
+   {
+    "num": 49,
+    "den": 1
+   },
+   {
+    "num": 50,
+    "den": 1
+   },
+   {
+    "num": 51,
+    "den": 1
+   },
+   {
+    "num": 52,
+    "den": 1
+   },
+   {
+    "num": 53,
+    "den": 1
+   },
+   {
+    "num": 54,
+    "den": 1
+   },
+   {
+    "num": 55,
+    "den": 1
+   },
+   {
+    "num": 56,
+    "den": 1
+   },
+   {
+    "num": 57,
+    "den": 1
+   },
+   {
+    "num": 58,
+    "den": 1
+   },
+   {
+    "num": 59,
+    "den": 1
+   },
+   {
+    "num": 60,
+    "den": 1
+   }
+  ]
+ },
+ "cam_sensibility_range": {
+  "camera_id": "Lens25mm",
+  "sensibility_iso_min": 30,
+  "sensibility_iso_max": 7518
+ },
+ "active_cam": {
+  "camera_id": "Lens25mm",
+  "is_auto": true
+ },
+ "cam_framerate": {
+  "playback_frame_rate": {
+   "num": 30,
+   "den": 1
+  },
+  "off_speed_frame_rate": {
+   "num": 48,
+   "den": 1
+  },
+  "timelapse_interval": {
+   "type": "TIMELAPSE_INTERVAL_TYPE_MINUTES",
+   "count": 1
+  }
+ },
+ "available_cams": {
+  "cameras": [
+   {
+    "id": "LensFront23mm",
+    "lens": {
+     "type": "LENS_TYPE_FRONT_MAIN",
+     "focal_length_mm": 23,
+     "optical_zoom_factor": 1.0,
+     "max_aperture": 2.2,
+     "zoom_min": 1.0,
+     "zoom_max": 10.0,
+     "light_max_strength_supported": 1
+    },
+    "white_balance_kelvin_min": 4294967246,
+    "white_balance_kelvin_max": 50,
+    "tint_min": -50,
+    "tint_max": 50,
+    "sensibility_iso_min": 45,
+    "sensibility_iso_max": 4324,
+    "frame_rate_min": {
+     "num": 24,
+     "den": 1
+    },
+    "frame_rate_max": {
+     "num": 30,
+     "den": 1
+    },
+    "shutter_min": {
+     "num": 46377,
+     "den": 1
+    },
+    "shutter_max": {
+     "num": 1000000932,
+     "den": 1
+    }
+   },
+   {
+    "id": "LensAuto",
+    "lens": {
+     "type": "LENS_TYPE_BACK_MAIN",
+     "focal_length_mm": 25,
+     "optical_zoom_factor": 1.0,
+     "max_aperture": 1.7,
+     "zoom_min": 0.5557734,
+     "zoom_max": 20.0,
+     "is_light_supported": true,
+     "light_max_strength_supported": 23
+    },
+    "white_balance_kelvin_min": 4294967246,
+    "white_balance_kelvin_max": 50,
+    "tint_min": -50,
+    "tint_max": 50,
+    "sensibility_iso_min": 30,
+    "sensibility_iso_max": 7518,
+    "frame_rate_min": {
+     "num": 24,
+     "den": 1
+    },
+    "frame_rate_max": {
+     "num": 30,
+     "den": 1
+    },
+    "shutter_min": {
+     "num": 56968,
+     "den": 1
+    },
+    "shutter_max": {
+     "num": 3115100197,
+     "den": 1
+    }
+   },
+   {
+    "id": "Lens25mm",
+    "lens": {
+     "type": "LENS_TYPE_BACK_WIDE_SECONDARY",
+     "focal_length_mm": 25,
+     "optical_zoom_factor": 1.0,
+     "max_aperture": 1.7,
+     "zoom_min": 1.0,
+     "zoom_max": 20.0,
+     "is_light_supported": true,
+     "light_max_strength_supported": 23
+    },
+    "white_balance_kelvin_min": 4294967246,
+    "white_balance_kelvin_max": 50,
+    "tint_min": -50,
+    "tint_max": 50,
+    "sensibility_iso_min": 30,
+    "sensibility_iso_max": 7518,
+    "frame_rate_min": {
+     "num": 24,
+     "den": 1
+    },
+    "frame_rate_max": {
+     "num": 30,
+     "den": 1
+    },
+    "shutter_min": {
+     "num": 56968,
+     "den": 1
+    },
+    "shutter_max": {
+     "num": 3115100197,
+     "den": 1
+    }
+   },
+   {
+    "id": "Lens14mm",
+    "lens": {
+     "type": "LENS_TYPE_BACK_WIDE",
+     "focal_length_mm": 14,
+     "optical_zoom_factor": 0.6,
+     "max_aperture": 2.2,
+     "zoom_min": 0.6,
+     "zoom_max": 4.8,
+     "is_light_supported": true,
+     "light_max_strength_supported": 23
+    },
+    "white_balance_kelvin_min": 4294967246,
+    "white_balance_kelvin_max": 50,
+    "tint_min": -50,
+    "tint_max": 50,
+    "sensibility_iso_min": 52,
+    "sensibility_iso_max": 5000,
+    "frame_rate_min": {
+     "num": 24,
+     "den": 1
+    },
+    "frame_rate_max": {
+     "num": 30,
+     "den": 1
+    },
+    "shutter_min": {
+     "num": 11546,
+     "den": 1
+    },
+    "shutter_max": {
+     "num": 3115099656,
+     "den": 1
+    }
+   },
+   {
+    "id": "Lens104mm",
+    "lens": {
+     "type": "LENS_TYPE_BACK_TELE",
+     "focal_length_mm": 104,
+     "optical_zoom_factor": 4.3,
+     "max_aperture": 3.05,
+     "zoom_min": 4.3,
+     "zoom_max": 86.0,
+     "is_light_supported": true,
+     "light_max_strength_supported": 23
+    },
+    "white_balance_kelvin_min": 4294967246,
+    "white_balance_kelvin_max": 50,
+    "tint_min": -50,
+    "tint_max": 50,
+    "sensibility_iso_min": 48,
+    "sensibility_iso_max": 4615,
+    "frame_rate_min": {
+     "num": 24,
+     "den": 1
+    },
+    "frame_rate_max": {
+     "num": 30,
+     "den": 1
+    },
+    "shutter_min": {
+     "num": 46377,
+     "den": 1
+    },
+    "shutter_max": {
+     "num": 3115099080,
+     "den": 1
+    }
+   }
+  ],
+  "is_auto_supported": true
+ },
+ "cam_tint_range": {
+  "camera_id": "Lens25mm",
+  "tint_min": -50,
+  "tint_max": 50
+ },
+ "cam_tint": {
+  "metering_mode": "METERING_MODE_AUTO",
+  "tint": -9
+ },
+ "cam_white_balance": {
+  "metering_mode": "METERING_MODE_AUTO",
+  "white_balance_kelvin": 6848
+ },
+ "cam_white_balance_range": {
+  "camera_id": "Lens25mm",
+  "white_balance_kelvin_min": 2500,
+  "white_balance_kelvin_max": 10000
+ },
+ "cam_zoom": {
+  "zoom_factor": 2.68
+ },
+ "cam_zoom_transition": {
+  "transition_time_secs": 1.0
+ },
+ "cam_exposure_comp_range": {
+  "camera_id": "Lens25mm",
+  "exposure_comp_stops_min": -4.0,
+  "exposure_comp_stops_max": 4.0
+ },
+ "cam_exposure_comp": {
+  "metering_mode": "METERING_MODE_AUTO",
+  "exposure_comp_stops": 0.0
+ },
+ "continuous_recording": {},
+ "cam_auto_exposure_preference": {
+  "auto_exposure_preference": "AUTO_EXPOSURE_PREFERENCE_SHUTTER_AND_ISO"
+ },
+ "slate": {
+  "reel": 1,
+  "scene": "1",
+  "take": 1,
+  "light": "SLATE_LIGHT_INTERIOR",
+  "time_of_day": "SLATE_TIME_OF_DAY_DAY",
+  "is_good_take_last_clip": false,
+  "production_name": "",
+  "director": "",
+  "camera_operator": "",
+  "is_take_auto_increment_enabled": false
+ },
+ "cam_shutter": {
+  "metering_mode": "METERING_MODE_AUTO",
+  "shutter_speed": {
+   "num": 1,
+   "den": 60
+  }
+ },
+ "available_auto_exposure_preferences": {
+  "available_auto_exposure_preferences": [
+   "AUTO_EXPOSURE_PREFERENCE_SHUTTER_AND_ISO"
+  ]
+ },
+ "cam_sensibility": {
+  "metering_mode": "METERING_MODE_AUTO",
+  "sensibility_iso": 482
+ },
+ "cam_aperture_values": {
+  "camera_id": "Lens25mm",
+  "apertures": [
+   1.7
+  ]
+ },
+ "cam_aperture": {
+  "aperture": 1.7
+ },
+ "cam_stabilization": {
+  "level": "STABILIZATION_LEVEL_OFF"
+ },
+ "cam_focus": {
+  "focus_value": 0.0,
+  "is_transitioning": false,
+  "is_locked": false
+ },
+ "cam_focus_range": {
+  "focus_max": 20.0
+ },
+ "cam_focus_markers": {
+  "transition_time_secs": 0.5,
+  "transition_mode": "FOCUS_MARKER_TRANSITION_MODE_CYCLE"
+ },
+ "recording_format": {
+  "width": 3840,
+  "height": 2160,
+  "color_space": "COLOR_SPACE_REC709"
+ },
+ "recording_state": {},
+ "cam_orientation": {
+  "orientation": "CAM_ORIENTATION_LANDSCAPE"
+ },
+ "cam_stabilization_values": {
+  "camera_id": "Lens25mm",
+  "stabilization_levels": [
+   "STABILIZATION_LEVEL_OFF",
+   "STABILIZATION_LEVEL_OPTICAL",
+   "STABILIZATION_LEVEL_STANDARD"
+  ]
+ },
+ "flicker_free_shutter": {
+  "flicker": 50
+ },
+ "cam_shutter_range": {
+  "camera_id": "Lens25mm",
+  "shutter_min": {
+   "num": 1
+  },
+  "shutter_max": {
+   "num": 1,
+   "den": 17553
+  }
+ },
+ "audio_source": {
+  "active_source_name": "Default",
+  "num_of_channels": 2
+ },
+ "cam_light": {
+  "light_value": 50
+ },
+ "cam_point_of_interest": {
+  "type": "CAM_POE_TYPE_SINGLE_SHOT_AE_AF"
+ },
+ "state": {
+  "control_mode": "CONTROL_MODE_FULL_CONTROL"
+ }
+}

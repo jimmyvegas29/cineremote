@@ -1,0 +1,57 @@
+// CineRemote - camera app remote-control protocol, as used by this project.
+// Written for interoperability with the Blackmagic Camera app's "Remote Camera" mode (protocol 5.0).
+// Field numbers must match the app; names are this project's. Not affiliated with Blackmagic Design.
+// Compile with tools/gen_proto.py (produces schema.pb, which the app loads at runtime).
+syntax = "proto3";
+package cineremote.mediasync.v1;
+
+
+message Clip {
+  string clip_id = 1;
+  string file_name = 2;
+  uint64 size_bytes = 3;
+  uint32 runtime_secs = 4;
+  uint64 creation_ts = 5;
+  optional bytes thumbnail_jpeg = 6;
+}
+
+message ListClipsRequest {
+  optional uint64 cutoff_ts = 1;
+  repeated string clip_ids = 2;
+  bool include_thumbnails = 3;
+}
+
+message ListClipsResponse {
+  repeated cineremote.mediasync.v1.Clip clips = 1;
+}
+
+message ClipDataStartRequest {
+  string clip_id = 1;
+  uint64 offset = 2;
+  uint64 size = 3;
+}
+
+message ClipDataStopRequest {
+  string clip_id = 1;
+}
+
+message ClipDataResponse {
+  string clip_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  uint32 data_crc32 = 4;
+}
+
+message Message {
+  oneof message {
+    cineremote.mediasync.v1.ListClipsRequest list_clips_request = 1;
+    cineremote.mediasync.v1.ListClipsResponse list_clips_response = 2;
+    cineremote.mediasync.v1.ClipDataStartRequest clip_data_start_request = 4;
+    cineremote.mediasync.v1.ClipDataStopRequest clip_data_stop_request = 5;
+    cineremote.mediasync.v1.ClipDataResponse clip_data_response = 6;
+  }
+}
+
+message RootMessage {
+  repeated cineremote.mediasync.v1.Message messages = 1;
+}
