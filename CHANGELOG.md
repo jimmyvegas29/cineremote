@@ -2,9 +2,10 @@
 
 ## 1.1.1
 
-- Fixed: the macOS app couldn't check for updates (it had no root certificates to verify github.com).
-  The app now carries its own CA bundle. **Mac users on 1.0.0 or 1.1.0: download this release once by
-  hand**; updates are automatic from here on. Windows and Linux were not affected.
+- Fixed: the update check could fail to verify github.com's certificate - always on macOS (the app had no
+  root certificates) and on Windows PCs that hadn't cached the needed root certificate yet. The app now
+  carries its own CA bundle. **On 1.0.0 or 1.1.0 and not seeing "Update available"? Download this release
+  once by hand**; updates are automatic from here on. Linux was not affected.
 - Windows updates are more robust: the installer now starts only after CineRemote has fully closed
   (including its clean disconnects from the phones), instead of racing the closing app.
 
