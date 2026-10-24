@@ -18,9 +18,17 @@ mkdir "$STAGE/.background"
 tiffutil -cathidpicheck assets/dmg-background.png assets/dmg-background@2x.png -out "$STAGE/.background/background.tiff" >/dev/null
 cp assets/cineremote.icns "$STAGE/.VolumeIcon.icns"
 
+# hdiutil fails now and then on CI runners ("Resource busy"): retry, and let its errors show.
+retry() { for i in 1 2 3 4; do "$@" && return 0; echo "[dmg] retry $i: $*" >&2; sleep $((i * 3)); done; return 1; }
 RW=$(mktemp -u).dmg
-hdiutil create -quiet -volname "$VOL" -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$RW"
-MNT=$(hdiutil attach -readwrite -noverify -noautoopen "$RW" | awk -F'\t' '/\/Volumes\//{print $NF}')
+retry hdiutil create -volname "$VOL" -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$RW"
+MNT=""
+for i in 1 2 3 4; do
+  MNT=$(hdiutil attach -readwrite -noverify -noautoopen "$RW" | awk -F'\t' '/\/Volumes\//{print $NF}') && [ -n "$MNT" ] && break
+  echo "[dmg] attach retry $i" >&2; sleep $((i * 3))
+done
+[ -n "$MNT" ] || { echo "[dmg] could not mount $RW"; exit 1; }
+echo "[dmg] mounted $MNT"
 SetFile -a C "$MNT" 2>/dev/null || true          # use .VolumeIcon.icns as the disk icon
 
 # Window layout through Finder. Needs a GUI session (GitHub's macOS runners have one); if Finder can't be
@@ -53,6 +61,6 @@ rm -rf "$MNT/.fseventsd"
 sync
 hdiutil detach -quiet "$MNT" || { sleep 2; hdiutil detach -force -quiet "$MNT"; }
 rm -f "$DMG"
-hdiutil convert -quiet "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG"
+retry hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -rf "$RW" "$STAGE"
 echo "[dmg] $DMG"
