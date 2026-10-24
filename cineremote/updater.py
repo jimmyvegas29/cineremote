@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -79,9 +80,19 @@ def asset_pattern():
     return None
 
 
+def _ssl_context():
+    """TLS with certifi's CA bundle: the python.org builds (and so the macOS app) ship no root certificates,
+    so the system default would fail to verify github.com there."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _get(url, timeout=10):
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
-    return urllib.request.urlopen(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
 
 
 def check(timeout=10):
@@ -140,16 +151,26 @@ def apply(path, relaunch=True):
     """Start installing the downloaded update. The caller quits the app right after this returns."""
     kind = install_kind()
     if kind == "windows":
-        # Inno Setup: no wizard pages, closes the running app, relaunches it when done (see cineremote.iss)
-        args = [path, "/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS"]
-        subprocess.Popen(args + (["/relaunch=1"] if relaunch else ["/VERYSILENT", "/SUPPRESSMSGBOXES"]),
-                         close_fds=True)
+        subprocess.Popen(windows_installer_command(path, os.getpid(), relaunch), close_fds=True,
+                         creationflags=0x08000000)       # CREATE_NO_WINDOW
     elif kind == "macos":
         _apply_macos(path, relaunch)
     elif kind == "appimage":
         _apply_appimage(path, relaunch)
     else:
         raise UpdateError("running from source: update with git pull")
+
+
+def windows_installer_command(path, pid, relaunch=True):
+    """Hidden PowerShell that waits for the app (pid) to exit - its clean camera disconnects included - and
+    only then starts the Inno Setup installer: no wizard pages, relaunch when done (see cineremote.iss).
+    Starting setup while the app is still closing made it fail to replace the files and roll back."""
+    args = ["/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS"]
+    args += ["/relaunch=1"] if relaunch else ["/VERYSILENT", "/SUPPRESSMSGBOXES"]
+    exe = path.replace("'", "''")
+    ps = (f"Wait-Process -Id {int(pid)} -Timeout 60 -ErrorAction SilentlyContinue; "
+          f"Start-Process -FilePath '{exe}' -ArgumentList '{' '.join(args)}'")
+    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps]
 
 
 def _apply_macos(path, relaunch=True):

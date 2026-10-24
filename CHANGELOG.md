@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed: the macOS app couldn't check for updates (it had no root certificates to verify github.com).
+  The app now carries its own CA bundle. **Mac users on 1.0.0 or 1.1.0: download this release once by
+  hand**; updates are automatic from here on. Windows and Linux were not affected.
+- Windows updates are more robust: the installer now starts only after CineRemote has fully closed
+  (including its clean disconnects from the phones), instead of racing the closing app.
+
 ## 1.1.0
 
 - **Record-arm:** a red ring on each camera card arms that camera. With any camera armed, the top button

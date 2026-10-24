@@ -35,7 +35,7 @@ if WIN:
     else:
         print("WARNING: vcam/out not built - the virtual webcam won't be bundled")
 
-hidden = collect_submodules("zeroconf") + collect_submodules("aiortc") + ["keyring.backends"]
+hidden = collect_submodules("zeroconf") + collect_submodules("aiortc") + ["keyring.backends", "certifi"]
 hidden += collect_submodules("keyring.backends")
 
 # Qt modules the app never imports (keeps the bundle smaller)
