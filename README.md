@@ -347,6 +347,10 @@ control sets what it passes on to OBS and to *Listen on PC*. The phone's own rec
 | [`packaging/`](packaging) | PyInstaller spec, Windows installer, AppImage and macOS app scripts |
 | [`tools/`](tools) | Test and measurement scripts, including an end-to-end OBS recording test (`obs_record_test.py --demo`) |
 
+## Companion Android camera app
+
+Phones that can't run the Blackmagic Camera app (it's limited to certain models) can use **[CineRemote Camera](camera-android/)**, a small open-source Android app that implements CineRemote's own remote-camera protocol: discovery, sign-in, live 1080p video + audio and full manual control, with no Blackmagic code. Verified on a Galaxy S20 FE.
+
 ## Contributing
 
 Issues and pull requests are welcome. Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the protocol, threads, outputs, packaging and updater fit together) and [CLAUDE.md](CLAUDE.md) (run/test commands, invariants, release steps). If CineRemote doesn't work with your phone, please open an issue with
