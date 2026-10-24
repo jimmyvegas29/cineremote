@@ -54,8 +54,8 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
     private val executor = Executor { handler.post(it) }
 
     val lenses: List<Lens> = enumerateLenses()
-    @Volatile var lens: Lens = lenses.firstOrNull { it.id == prefs.cameraId }
-        ?: lenses.firstOrNull { it.type == LENS_MAIN } ?: lenses.first()
+    @Volatile var lens: Lens = lenses.firstOrNull { it.id == prefs.cameraId && it.facing == CameraCharacteristics.LENS_FACING_BACK }
+        ?: lenses.firstOrNull { it.type == LENS_MAIN } ?: lenses.first { it.facing == CameraCharacteristics.LENS_FACING_BACK }
         private set
 
     // ---- requested settings (what the remote/user set)
@@ -87,6 +87,9 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
 
     fun handlerPost(block: () -> Unit) = handler.post(block)
 
+    /** Set the frame rate and remember it. */
+    fun selectFps(v: Int) { fps = v.coerceIn(1, 240); prefs.fps = fps }
+
     // ------------------------------------------------------------------ lenses
     private fun enumerateLenses(): List<Lens> {
         val raw = manager.cameraIdList.mapNotNull { id ->
@@ -114,6 +117,23 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         }.distinctBy { "${it.facing}/${it.equivMm}" }       // Samsung lists some sensors twice
         list.forEach { Log.i(TAG, "lens ${it.id}: facing=${it.facing} ${it.focalMm}mm eq ${it.equivMm}mm x${it.zoomVsMain} type=${it.type}") }
         return list.sortedWith(compareBy({ it.facing == CameraCharacteristics.LENS_FACING_FRONT }, { it.equivMm }))
+    }
+
+    /** The capture/stream size for the current lens: the largest ~16:9 size it actually supports (so the
+     *  SurfaceTexture/preview/recorder never stretch a 4:3 sensor output into a 16:9 buffer). */
+    val captureSize: android.util.Size get() = pick169(lens)
+
+    private fun pick169(l: Lens): android.util.Size {
+        val map = l.chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val sizes = (map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)?.toList() ?: emptyList())
+            .ifEmpty { listOf(android.util.Size(1920, 1080)) }
+        val wide = sizes.filter { kotlin.math.abs(it.width.toFloat() / it.height - 16f / 9f) < 0.02f }
+            .filter { it.width <= 1920 && it.height <= 1080 }
+        val chosen = wide.maxByOrNull { it.width.toLong() * it.height }
+            ?: sizes.filter { it.width <= 1920 && it.height <= 1080 }.maxByOrNull { it.width.toLong() * it.height }
+            ?: android.util.Size(1280, 720)
+        Log.i(TAG, "lens ${l.id} capture size $chosen (of ${sizes.take(6)})")
+        return chosen
     }
 
     val chars get() = lens.chars
@@ -147,12 +167,16 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         reopen()
     }
 
+    /** Notified (on the camera thread) when the capture size changes, so preview/stream can be resized. */
+    var onCaptureSizeChanged: ((android.util.Size) -> Unit)? = null
+
     fun switchLens(id: String) = handler.post {
         val l = lenses.firstOrNull { it.id == id } ?: return@post
         if (l.id == lens.id) return@post
         lens = l
-        prefs.cameraId = id
+        if (l.facing == CameraCharacteristics.LENS_FACING_BACK) prefs.cameraId = id
         zoom = 1f
+        onCaptureSizeChanged?.invoke(captureSize)
         reopen()
         listener.onCameraChanged(ALL_FIELDS)
     }

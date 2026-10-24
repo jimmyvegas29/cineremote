@@ -26,8 +26,8 @@ class Recorder(private val context: Context) {
     private var uri: Uri? = null
     var inputSurface: Surface? = null
         private set
-    private val width = 1920
-    private val height = 1080
+    var width = 1920
+    var height = 1080
 
     @Volatile var startWallMs = 0L
         private set
@@ -36,8 +36,9 @@ class Recorder(private val context: Context) {
     val isRecording get() = startWallMs > 0
 
     /** Create and prepare a recorder; returns the surface the camera must target before [start]. */
-    fun prepare(fps: Int): Surface? {
+    fun prepare(fps: Int, size: android.util.Size? = null): Surface? {
         release()
+        size?.let { width = it.width; height = it.height }
         val name = "CineRemote_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)

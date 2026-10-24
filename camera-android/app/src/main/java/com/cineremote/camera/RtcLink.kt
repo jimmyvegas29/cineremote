@@ -152,6 +152,8 @@ class RtcLink(context: Context) {
         pc?.addIceCandidate(IceCandidate("0", 0, sdp))
     }
 
+    fun setStreamSize(w: Int, h: Int) = textureHelper.setTextureSize(w, h)
+
     fun send(bytes: ByteArray): Boolean {
         val d = dc ?: return false
         if (d.state() != DataChannel.State.OPEN) return false

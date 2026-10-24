@@ -37,6 +37,7 @@ class ControllerSession(
         controller.onDisconnect = { close("controller requested disconnect") }
         controller.onIdentify = { onIdentify?.invoke() }
 
+        rtc.setStreamSize(engine.captureSize.width, engine.captureSize.height)
         engine.setStreamSurface(rtc.cameraInputSurface)
         rtc.open(object : RtcLink.SessionListener {
             override fun onLocalOffer(sdp: String) = link.send("sdp_offer", JSONObject().put("value", sdp))
@@ -82,6 +83,8 @@ class ControllerSession(
         val ok = rtc.send(SubordinateMessages.newBuilder().addMessages(m).build().toByteArray())
         if (!ok) Log.d(TAG, "drop ${m.messageCase} (data channel not open)")
     }
+
+    fun setStreamSize(w: Int, h: Int) = rtc.setStreamSize(w, h)
 
     /** Push changed properties (camera switched, auto values moved) to the controller. */
     fun emitChanged(fields: Set<String>) = controller.emitChanged(fields)
