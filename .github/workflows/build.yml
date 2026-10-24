@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.12"
   PYINSTALLER: "pyinstaller==6.22.2"
   OBS_VER: "32.1.2"
   QT_QPA_PLATFORM: offscreen      # smoke tests run the real app without a display
@@ -22,6 +22,7 @@ env:
 jobs:
   windows:
     runs-on: windows-2022
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,6 +73,7 @@ jobs:
             dist/*.zip
 
   linux:
+    timeout-minutes: 45
     runs-on: ubuntu-22.04        # oldest supported glibc = widest compatibility for the AppImage
     steps:
       - uses: actions/checkout@v4
@@ -123,6 +125,7 @@ jobs:
           - runner: macos-15-intel    # Intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

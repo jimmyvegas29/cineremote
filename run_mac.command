@@ -5,7 +5,7 @@
 cd "$(dirname "$0")"
 if [ ! -x venv/bin/python ]; then
   echo "First run: creating the Python environment..."
-  PY=$(command -v python3.12 || command -v python3.11 || echo /usr/local/bin/python3)
+  PY=$(command -v python3.13 || command -v python3.12 || command -v python3.11 || echo /usr/local/bin/python3)
   "$PY" -m venv venv && venv/bin/pip install -q -r requirements.txt || exit 1
 fi
 exec venv/bin/python cineremote.py "$@"

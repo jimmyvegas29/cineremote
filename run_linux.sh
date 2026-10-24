@@ -5,6 +5,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 export QT_LOGGING_RULES="qt.qpa.wayland.textinput=false${QT_LOGGING_RULES:+;$QT_LOGGING_RULES}"  # harmless Wayland IME noise
 if [ ! -x venv/bin/python ]; then
   echo "First run: creating the Python environment..."
-  python3 -m venv venv && venv/bin/pip install -q -r requirements.txt || exit 1
+  PY=$(command -v python3.13 || command -v python3.12 || command -v python3)   # 3.12+ required
+  "$PY" -m venv venv && venv/bin/pip install -q -r requirements.txt || exit 1
 fi
 exec venv/bin/python cineremote.py "$@"

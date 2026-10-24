@@ -239,7 +239,7 @@ Everything stays on your local network. CineRemote contacts the internet only to
 
 ## Run from source / build it yourself
 
-Running from source needs **Python 3.11 or newer**.
+Running from source needs **Python 3.12 or newer**.
 
 ```bash
 git clone https://github.com/jimmyvegas29/cineremote.git
