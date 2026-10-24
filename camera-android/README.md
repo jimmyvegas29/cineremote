@@ -14,11 +14,14 @@ like any other camera — live preview, manual controls, recording.
 - Live **1080p H.264** video + audio to CineRemote over WebRTC.
 - Manual control from CineRemote: lens, frame rate, ISO, shutter, white balance, tint, exposure
   compensation, focus (and tap-to-focus), zoom, stabilization, torch.
-- Recording to `Movies/CineRemote/*.mp4` on the phone, started/stopped from CineRemote.
-- **On-phone camera UI** (Blackmagic-style HUD): a thin top row of small readouts (LENS · FPS · SHUTTER ·
-  timecode · ISO · WB · TINT · EV · FOCUS · ZOOM · battery), a compact record button on the right rail,
-  and a settings gear. Tap a readout to edit it with a slide-up value wheel (with an AUTO toggle); tap the
-  picture to focus. Name / letter / password are in Settings.
+- Recording to `Movies/CineRemote/*.mp4` on the phone (1080p30, locked frame rate), started/stopped on the
+  phone or from CineRemote. Stream and recording stay upright with the phone either way round.
+- **On-phone camera UI** laid out like the Blackmagic Camera app: LENS · FPS · SHUTTER · IRIS readouts,
+  a running timecode (with frames) and ISO · WB · TINT across the top with blue "A" badges for automatic
+  values and a resolution/aspect badge; live RGB histogram, record-time/storage and stereo audio meter
+  panels along the bottom; a tool column (frame guides, autofocus, exposure, torch, record, lens/zoom,
+  stabilisation, front/back) and a Camera · Media · Remote · Settings rail. Tap a readout or tool to edit
+  it on a value ruler (with AUTO); tap the picture to focus.
 
 Verified on a Samsung Galaxy S20 FE (Android 13) against CineRemote on Windows.
 
@@ -51,4 +54,9 @@ compiled into the APK by the Gradle protobuf plugin.
 | `CameraEngine.kt` | Camera2 pipeline and every manual control |
 | `Recorder.kt` | on-phone MP4 recording |
 | `ControllerSession.kt` | binds one controller's signaling + data channel + camera |
-| `MainActivity.kt` | preview, overlay, settings |
+| `FrameTap.kt` | the camera's GPU frame tap: turns frames upright, feeds the preview, stream and histogram |
+| `AudioMeter.kt` | input levels for the audio meter |
+| `CameraHud.kt` | the on-phone camera screen |
+| `MainActivity.kt` | wiring, preview placement, settings / media / remote |
+
+The UI font is [Lato](https://www.latofonts.com/) (SIL Open Font License, see `LATO_OFL.txt`).

@@ -79,7 +79,6 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
 
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
-    private var previewSurface: Surface? = null
     private var streamSurface: Surface? = null
     private var recordSurface: Surface? = null
     @Volatile var recording = false
@@ -150,13 +149,27 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: arrayOf(Range(30, 30))
         return listOf(24, 25, 30, 48, 50, 60).filter { f -> ranges.any { it.lower <= f && it.upper >= f } }
     }
+    /** Fixed lens aperture (phones have no iris), shown greyed out like the Blackmagic app's IRIS. */
+    val aperture: Float get() = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull() ?: 0f
+
+    // ---- orientation
+    /** Display rotation in degrees (90 or 270 in landscape); MainActivity keeps it current. */
+    @Volatile var displayRotation = 90
+    val isFront: Boolean get() = lens.facing == CameraCharacteristics.LENS_FACING_FRONT
+    private val sensorOrientation: Int get() = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+    /** Clockwise degrees the raw sensor image must turn to stand upright (0, or 180 with the phone flipped). */
+    val uprightDegrees: Int get() =
+        if (isFront) (sensorOrientation + displayRotation) % 360 else (sensorOrientation - displayRotation + 360) % 360
+    /** (degrees, mirror) for [FrameTap]: undo the sensor rotation (and the front camera's mirror) that Camera2
+     *  puts in a SurfaceTexture's transform, then stand the picture upright - matching the recorded file. */
+    fun streamTransform(): Pair<Int, Boolean> = Pair(-sensorOrientation + uprightDegrees, isFront)
+
     val hasTorch: Boolean get() = hasTorchFor(lens)
     fun hasTorchFor(l: Lens): Boolean = l.chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
 
     // ------------------------------------------------------------------ open / close
     private var pendingOnConfigured: (() -> Unit)? = null
 
-    fun setPreviewSurface(s: Surface?) = handler.post { previewSurface = s; reopen() }
     fun setStreamSurface(s: Surface?) = handler.post { streamSurface = s; reopen() }
 
     /** Add/remove the recorder surface and rebuild the session; [onReady] runs once it is configured. */
@@ -183,7 +196,7 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
 
     @SuppressLint("MissingPermission")
     private fun reopen() {
-        if (previewSurface == null && streamSurface == null) return
+        if (streamSurface == null) return
         closeDevice()
         try {
             manager.openCamera(lens.id, object : CameraDevice.StateCallback() {
@@ -210,7 +223,7 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
 
     private fun createSession() {
         val d = device ?: return
-        val outs = listOfNotNull(previewSurface, streamSurface, recordSurface).map { OutputConfiguration(it) }
+        val outs = listOfNotNull(streamSurface, recordSurface).map { OutputConfiguration(it) }
         val cfg = SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outs, executor,
             object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(s: CameraCaptureSession) {
@@ -235,7 +248,6 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
     private fun buildRequest(template: Int = CameraDevice.TEMPLATE_RECORD): CaptureRequest.Builder? {
         val d = device ?: return null
         val b = d.createCaptureRequest(template)
-        previewSurface?.let { b.addTarget(it) }
         streamSurface?.let { b.addTarget(it) }
         if (recording) recordSurface?.let { b.addTarget(it) }
         b.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
@@ -293,7 +305,9 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         val active = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return@post
         val z = zoom.coerceAtLeast(1f)
         val cw = active.width() / z; val ch = active.height() / z           // zoom crops around the centre
-        val cx = active.centerX() - cw / 2 + x * cw; val cy = active.centerY() - ch / 2 + y * ch
+        // the picture is the sensor image turned by uprightDegrees (0 or 180 in landscape): map back
+        val sx = if (uprightDegrees == 180) 1f - x else x; val sy = if (uprightDegrees == 180) 1f - y else y
+        val cx = active.centerX() - cw / 2 + sx * cw; val cy = active.centerY() - ch / 2 + sy * ch
         val half = (active.width() * 0.05f / z).toInt()
         val r = Rect((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt())
         r.intersect(active)

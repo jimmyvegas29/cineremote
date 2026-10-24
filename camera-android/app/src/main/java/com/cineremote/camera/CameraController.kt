@@ -357,7 +357,7 @@ class CameraController(
 
     private fun startRecording(): Boolean {
         if (recordingActive) return true
-        val surface = recorder.prepare(engine.fps, engine.captureSize) ?: return false
+        val surface = recorder.prepare(engine.fps, engine.captureSize, engine.uprightDegrees) ?: return false
         recordingActive = true
         // Add the recorder surface to the camera, then start the recorder once it's receiving frames.
         engine.setRecordSurface(surface) { recorder.start(); emitRecordingState() }

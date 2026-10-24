@@ -19,10 +19,11 @@ class ControllerSession(
     private val engine: CameraEngine,
     private val recorder: Recorder,
     private val prefs: Prefs,
+    private val tap: FrameTap,
     batteryPct: () -> Float,
     private val onClosed: (ControllerSession) -> Unit,
 ) {
-    private val rtc = RtcLink(context)
+    private val rtc = RtcLink(context, tap.egl)
     private var closed = false
     val controller = CameraController(engine, recorder, prefs, batteryPct) { m -> sendSubordinate(m) }
 
@@ -37,8 +38,7 @@ class ControllerSession(
         controller.onDisconnect = { close("controller requested disconnect") }
         controller.onIdentify = { onIdentify?.invoke() }
 
-        rtc.setStreamSize(engine.captureSize.width, engine.captureSize.height)
-        engine.setStreamSurface(rtc.cameraInputSurface)
+        tap.sink = rtc::onFrame
         rtc.open(object : RtcLink.SessionListener {
             override fun onLocalOffer(sdp: String) = link.send("sdp_offer", JSONObject().put("value", sdp))
             override fun onIceCandidate(candidate: String) =
@@ -84,8 +84,6 @@ class ControllerSession(
         if (!ok) Log.d(TAG, "drop ${m.messageCase} (data channel not open)")
     }
 
-    fun setStreamSize(w: Int, h: Int) = rtc.setStreamSize(w, h)
-
     /** Push changed properties (camera switched, auto values moved) to the controller. */
     fun emitChanged(fields: Set<String>) = controller.emitChanged(fields)
 
@@ -100,9 +98,9 @@ class ControllerSession(
         if (closed) return
         closed = true
         Log.i(TAG, "session closed: $reason")
-        // Remove the stream surface, then release RTC on the camera thread so ordering is safe.
-        engine.setStreamSurface(null)
-        engine.handler.post { rtc.release() }
+        // Detach from the frame tap, then release RTC on the tap's thread so no frame is mid-delivery.
+        tap.sink = null
+        tap.handler.post { rtc.release() }
         link.close()
         onClosed(this)
     }

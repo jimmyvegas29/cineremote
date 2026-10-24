@@ -14,7 +14,6 @@ import org.webrtc.RtpParameters
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
-import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoFrame
 import org.webrtc.VideoSource
 import org.webrtc.audio.JavaAudioDeviceModule
@@ -25,9 +24,10 @@ import java.nio.ByteBuffer
  *  1. we offer a data channel "signaling-channel" (the controller only ever answers), sent over the WebSocket
  *  2. on StartPreview we add sendonly H.264 video + Opus audio and re-offer over the data channel
  * Video is hardware H.264 Constrained Baseline - what CineRemote's aiortc stack decodes.
- * Camera frames arrive through [textureHelper] (the camera renders into its SurfaceTexture).
+ * Camera frames arrive upright from the [FrameTap] via [onFrame]; [egl] is the tap's context, shared so the
+ * hardware encoder can read its textures.
  */
-class RtcLink(context: Context) {
+class RtcLink(context: Context, private val egl: EglBase) {
 
     interface SessionListener {
         fun onLocalOffer(sdp: String)
@@ -37,11 +37,7 @@ class RtcLink(context: Context) {
         fun onSessionClosed(reason: String)
     }
 
-    val egl: EglBase = EglBase.create()
     private val factory: PeerConnectionFactory
-    val textureHelper: SurfaceTextureHelper
-    /** The camera renders into this; frames are forwarded to the stream only while previewing. */
-    val cameraInputSurface: android.view.Surface
     private val videoSource: VideoSource
     private val videoTrack: org.webrtc.VideoTrack
     private val audioTrack: org.webrtc.AudioTrack
@@ -58,6 +54,9 @@ class RtcLink(context: Context) {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
         val adm = JavaAudioDeviceModule.builder(context)
+            // Raw camera mic, not the default VOICE_COMMUNICATION: no call processing, and a call-mode capture
+            // takes priority over the recorder and level meter sharing the mic.
+            .setAudioSource(android.media.MediaRecorder.AudioSource.CAMCORDER)
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
             .createAudioDeviceModule()
@@ -76,14 +75,12 @@ class RtcLink(context: Context) {
             mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "false"))
         }
         audioTrack = factory.createAudioTrack("audio0", factory.createAudioSource(ac))
-        textureHelper = SurfaceTextureHelper.create("camera-frames", egl.eglBaseContext)
-        textureHelper.setTextureSize(1920, 1080)
-        // Always drain the SurfaceTexture (an unconsumed one stalls the camera); forward only while streaming.
-        textureHelper.startListening { frame: VideoFrame ->
-            if (streaming) videoSource.capturerObserver.onFrameCaptured(frame)
-        }
         videoSource.capturerObserver.onCapturerStarted(true)
-        cameraInputSurface = android.view.Surface(textureHelper.surfaceTexture)
+    }
+
+    /** An upright camera frame from the [FrameTap] (its GL thread); forwarded only while previewing. */
+    fun onFrame(frame: VideoFrame) {
+        if (streaming) videoSource.capturerObserver.onFrameCaptured(frame)
     }
 
     // ------------------------------------------------------------------ session
@@ -152,8 +149,6 @@ class RtcLink(context: Context) {
         pc?.addIceCandidate(IceCandidate("0", 0, sdp))
     }
 
-    fun setStreamSize(w: Int, h: Int) = textureHelper.setTextureSize(w, h)
-
     fun send(bytes: ByteArray): Boolean {
         val d = dc ?: return false
         if (d.state() != DataChannel.State.OPEN) return false
@@ -209,12 +204,8 @@ class RtcLink(context: Context) {
 
     fun release() {
         close()
-        runCatching { cameraInputSurface.release() }
-        runCatching { textureHelper.stopListening() }
-        runCatching { textureHelper.dispose() }
         runCatching { videoSource.dispose() }
         runCatching { factory.dispose() }
-        runCatching { egl.release() }
     }
 
     companion object { const val TAG = "CRCam.Rtc" }

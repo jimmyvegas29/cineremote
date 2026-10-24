@@ -35,8 +35,9 @@ class Recorder(private val context: Context) {
         private set
     val isRecording get() = startWallMs > 0
 
-    /** Create and prepare a recorder; returns the surface the camera must target before [start]. */
-    fun prepare(fps: Int, size: android.util.Size? = null): Surface? {
+    /** Create and prepare a recorder; returns the surface the camera must target before [start].
+     *  [rotation] is written to the file so players show it upright (180 with the phone flipped). */
+    fun prepare(fps: Int, size: android.util.Size? = null, rotation: Int = 0): Surface? {
         release()
         size?.let { width = it.width; height = it.height }
         val name = "CineRemote_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
@@ -62,6 +63,7 @@ class Recorder(private val context: Context) {
                 setAudioSamplingRate(48000)
                 setAudioChannels(2)
                 setAudioEncodingBitRate(192_000)
+                setOrientationHint(rotation)
                 prepare()
             }
             recorder = r; pfd = fd; uri = u

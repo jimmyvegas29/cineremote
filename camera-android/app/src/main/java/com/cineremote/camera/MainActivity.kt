@@ -3,16 +3,17 @@ package com.cineremote.camera
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.hardware.display.DisplayManager
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.text.InputType
 import android.view.Gravity
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
@@ -20,6 +21,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONObject
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 /**
  * CineRemote Camera. A Blackmagic-style on-phone camera (preview + [CameraHud]) that CineRemote can also
@@ -31,11 +36,13 @@ class MainActivity : Activity(), RemoteServer.Listener {
     private lateinit var engine: CameraEngine
     private lateinit var recorder: Recorder
     private lateinit var server: RemoteServer
+    private lateinit var tap: FrameTap
+    private val meter = AudioMeter()
     private var session: ControllerSession? = null
 
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var root: FrameLayout
-    private lateinit var preview: SurfaceView
+    private lateinit var preview: SurfaceViewRenderer
     private lateinit var hud: CameraHud
     private lateinit var permNote: TextView
 
@@ -81,27 +88,35 @@ class MainActivity : Activity(), RemoteServer.Listener {
             override fun onCameraChanged(fields: Set<String>) { ui.post { session?.emitChanged(fields); hud.invalidate() } }
             override fun onCameraError(message: String) { ui.post { toast(message) } }
         })
+        trackDisplayRotation()
+        // The camera renders only into the frame tap, which feeds the on-screen preview, the stream and the
+        // histogram. A separate preview output would make three camera streams while recording, and the
+        // S20 drops to ~26 fps with three; with two it holds 30.
+        tap = FrameTap(this) { engine.streamTransform() }
+        preview.init(tap.egl.eglBaseContext, null)
+        preview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+        tap.previewSink = preview
+        engine.setStreamSurface(tap.surface)
+        applyCaptureSize(engine.captureSize.width, engine.captureSize.height)
+        meter.start()
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            // debug builds: `adb shell am broadcast -a com.cineremote.camera.SNAP` saves the stream's next frame
+            registerReceiver(object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context, i: Intent) { tap.snapshotTo = java.io.File(getExternalFilesDir(null), "tap.jpg") }
+            }, android.content.IntentFilter("com.cineremote.camera.SNAP"), RECEIVER_EXPORTED)
+        }
         engine.onCaptureSizeChanged = { size -> ui.post { applyCaptureSize(size.width, size.height) } }
         hud.engine = engine
         hud.recorder = recorder
+        hud.meter = meter
+        hud.histogram = { tap.histogram }
         hud.deviceName = prefs.deviceName
         hud.onRecordToggle = { toggleRecordLocal() }
         hud.onSettings = { settingsDialog() }
+        hud.onMedia = { openMedia() }
+        hud.onRemote = { remoteDialog() }
         hud.onParamChanged = { ui.post { session?.emitChanged(CameraEngine.ALL_FIELDS) } }
 
-        preview.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(h: SurfaceHolder) {
-                applyCaptureSize(engine.captureSize.width, engine.captureSize.height)
-                engine.setPreviewSurface(h.surface)
-            }
-            override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-            override fun surfaceDestroyed(h: SurfaceHolder) { engine.setPreviewSurface(null) }
-        })
-        // If the surface already exists (created before this callback was added), start now.
-        if (preview.holder.surface?.isValid == true) {
-            applyCaptureSize(engine.captureSize.width, engine.captureSize.height)
-            engine.setPreviewSurface(preview.holder.surface)
-        }
         server = RemoteServer(this, prefs, this)
         server.start()
         ui.post(refreshRunnable)
@@ -109,21 +124,33 @@ class MainActivity : Activity(), RemoteServer.Listener {
         hud.invalidate()
     }
 
-    /** Size the preview SurfaceView to the capture aspect, letterboxed and centered (no stretch). */
+    /** New capture size: the frame tap matches it, and the HUD re-fits the picture rectangle (which places
+     *  the preview view, see [placePreview]). */
     private fun applyCaptureSize(w: Int, h: Int) {
-        preview.holder.setFixedSize(w, h)
-        val dm = resources.displayMetrics
-        val vw: Int; val vh: Int
-        if (dm.widthPixels * h > dm.heightPixels * w) { vh = dm.heightPixels; vw = vh * w / h }
-        else { vw = dm.widthPixels; vh = vw * h / w }
-        preview.layoutParams = FrameLayout.LayoutParams(vw, vh, Gravity.CENTER)
-        session?.setStreamSize(w, h)
+        tap.setSize(w, h)
+        hud.captureAspect = w.toFloat() / h
+    }
+
+    private fun placePreview(r: android.graphics.Rect) {
+        preview.layoutParams = FrameLayout.LayoutParams(r.width(), r.height()).apply { leftMargin = r.left; topMargin = r.top }
+    }
+
+    /** Landscape can be either way up (sensorLandscape): keep the engine told, so stream and recordings stay upright. */
+    private fun trackDisplayRotation() {
+        val dm = getSystemService(DISPLAY_SERVICE) as DisplayManager
+        fun update() { engine.displayRotation = (display?.rotation ?: 1) * 90 }
+        update()
+        dm.registerDisplayListener(object : DisplayManager.DisplayListener {
+            override fun onDisplayChanged(id: Int) { update() }
+            override fun onDisplayAdded(id: Int) {}
+            override fun onDisplayRemoved(id: Int) {}
+        }, ui)
     }
 
     // ------------------------------------------------------------------ RemoteServer.Listener
     override fun onControllerAuthorized(link: RemoteServer.SignalingLink, controllerInfo: JSONObject): Boolean {
         if (session != null) return false
-        val s = ControllerSession(this, link, engine, recorder, prefs, ::batteryPct) { done ->
+        val s = ControllerSession(this, link, engine, recorder, prefs, tap, ::batteryPct) { done ->
             ui.post { if (session === done) { session = null; hud.connected = false; hud.invalidate() } }
         }
         s.onIdentify = { ui.post { flashScreen() } }
@@ -145,7 +172,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
         if (recorder.isRecording) {
             engine.setRecordSurface(null) { recorder.stop(); ui.post { session?.emitChanged(setOf("recording_state")); hud.invalidate() } }
         } else {
-            val surface = recorder.prepare(engine.fps, engine.captureSize) ?: run { toast("couldn't start recording"); return }
+            val surface = recorder.prepare(engine.fps, engine.captureSize, engine.uprightDegrees) ?: run { toast("couldn't start recording"); return }
             engine.setRecordSurface(surface) { recorder.start(); ui.post { session?.emitChanged(setOf("recording_state")); hud.invalidate() } }
         }
     }
@@ -169,6 +196,34 @@ class MainActivity : Activity(), RemoteServer.Listener {
     }
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    /** Media: open the newest clip in the phone's player (or the clip folder if there is none yet). */
+    private fun openMedia() {
+        val uri = contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID),
+            "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/CineRemote%"),
+            "${MediaStore.Video.Media.DATE_ADDED} DESC")?.use { c ->
+            if (c.moveToFirst()) android.content.ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, c.getLong(0)) else null
+        }
+        if (uri == null) { toast("No clips yet"); return }
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        }.onFailure { toast("No video player found") }
+    }
+
+    /** Remote: how CineRemote finds this camera, and whether it is connected. */
+    private fun remoteDialog() {
+        val ips = runCatching {
+            NetworkInterface.getNetworkInterfaces().toList().filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }.filterIsInstance<Inet4Address>().map { it.hostAddress }
+        }.getOrDefault(emptyList())
+        val msg = buildString {
+            append("Camera: ${prefs.deviceName}\n")
+            append("Address: ${ips.joinToString().ifEmpty { "no network" }}  (port 2222)\n\n")
+            append(if (session != null) "Connected to CineRemote." else "Waiting for CineRemote. It finds this camera automatically on the same Wi-Fi.")
+            if (prefs.password == Prefs.DEFAULT_PASSWORD) append("\n\nUsing the default password - change it in Settings.")
+        }
+        AlertDialog.Builder(this).setTitle("Remote").setMessage(msg).setPositiveButton("OK", null).show()
+    }
 
     private fun settingsDialog() {
         val pad = (16 * resources.displayMetrics.density).toInt()
@@ -203,9 +258,10 @@ class MainActivity : Activity(), RemoteServer.Listener {
         // No opaque root background (it would paint over the SurfaceView hole-punch). The fullscreen theme
         // gives a black window, so the letterbox bars are black.
         root = FrameLayout(this)
-        preview = SurfaceView(this)
-        root.addView(preview, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))   // resized in applyCaptureSize
+        preview = SurfaceViewRenderer(this)
+        root.addView(preview, FrameLayout.LayoutParams(1, 1))     // placed by the HUD's picture rectangle
         hud = CameraHud(this)
+        hud.onPreviewRect = { r -> placePreview(r) }
         root.addView(hud, FrameLayout.LayoutParams(-1, -1))
         permNote = TextView(this).apply {
             text = "Starting camera…"; setTextColor(Color.WHITE); textSize = 14f; setPadding(40, 40, 40, 40)
@@ -220,6 +276,8 @@ class MainActivity : Activity(), RemoteServer.Listener {
         session?.close("activity destroyed")
         if (::server.isInitialized) server.stop()
         if (::recorder.isInitialized) { recorder.forceStopIfNeeded(); recorder.release() }
+        meter.stop()
         if (::engine.isInitialized) engine.release()
+        if (::tap.isInitialized) { tap.previewSink = null; preview.release(); tap.handler.post { tap.release() } }
     }
 }
