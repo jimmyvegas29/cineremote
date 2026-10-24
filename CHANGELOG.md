@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.5
+
+- **macOS:** the app is now signed with a stable CineRemote certificate instead of a throwaway signature that
+  changed with every build. macOS then recognises each update as the same app, so permissions you granted -
+  above all **Local Network** (needed to find the phones) - should carry over to future updates instead of
+  being asked for again. You may have to allow Local Network one last time for 1.1.5. (The first-launch
+  "could not verify" prompt still needs *Open Anyway*: that one only goes away with Apple notarization.)
+
 ## 1.1.4
 
 - **macOS:** releases ship only the `.dmg` now (no separate `.zip`), and the in-app updater installs from it.

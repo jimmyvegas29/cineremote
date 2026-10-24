@@ -41,6 +41,8 @@ Native parts: `obs-plugin\build.bat` / `build_linux.sh` / `OBS_UNIVERSAL=1 build
   sent to OBS or the webcam.
 - **Threads:** backend → GUI only via Qt signals; GUI → backend only via `Backend.call()` / connect /
   disconnect. Each frame consumer owns its own `VideoReformatter`.
+- **macOS signing certificate** (repo secrets `MACOS_SIGN_P12*`) must stay the same: replacing it changes
+  the app's identity and every Mac user has to re-allow Local Network once.
 - **Python 3.12+** (PySide6 6.12 Linux wheels crash on 3.11). Intel-Mac `cryptography<49` pin stays
   until a newer release ships an x86_64 macOS wheel.
 - No personal data in the repo: no phone IPs, passwords, serials or real-phone screenshots. Tools take

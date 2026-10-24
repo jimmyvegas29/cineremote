@@ -246,6 +246,13 @@ orange/red meter zones. The webcam is off for demo cameras; OBS output is on. RE
 - Windows installer `packaging/windows/cineremote.iss` (Inno Setup 6): app in `Program Files\CineRemote`,
   OBS plugin in `ProgramData\obs-studio\plugins`, versioned webcam DLL registered with `regserver`,
   `ProgramData\CineRemote` ACL via icacls (LocalService modify), `[Code] Relaunch` for `/relaunch=1`.
+- macOS signing: a stable **self-signed** certificate ("CineRemote Code Signing", 10 years, SHA-1
+  `1FDBFDCF…`) lives in the repo secrets `MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`; CI imports it into a
+  temporary keychain (`packaging/macos/import_signing_identity.sh`) and `build_app.sh` signs with
+  `SIGN_IDENTITY`. Every build then has the designated requirement `identifier "com.cineremote.app" and
+  certificate root = H"1fdbfdcf…"` instead of an ad-hoc `cdhash`, so macOS privacy grants (Local Network)
+  survive updates. It is not a Developer ID (no notarization). Release tags fail without the secret; PRs and
+  local builds sign ad-hoc. **Losing or rotating the certificate makes every user re-grant permissions once.**
 - Linux `packaging/linux/build_appimage.sh` (appimagetool, extract-and-run so no FUSE needed in CI);
   macOS `packaging/macos/build_app.sh` (ad-hoc codesign) then `packaging/macos/build_dmg.sh` (the one
   macOS download, also what the updater installs - a drag-to-Applications disk image: Applications symlink, HiDPI background

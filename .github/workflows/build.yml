@@ -138,6 +138,21 @@ jobs:
         run: pip install -r requirements.txt ${{ env.PYINSTALLER }}
       - name: Smoke test (source)
         run: python cineremote.py --demo --quit-after 6
+      - name: Signing identity
+        # Stable self-signed certificate (repo secrets) -> the same designated requirement in every build, so
+        # macOS keeps Local Network permission across updates. Forks / PRs without the secret sign ad-hoc,
+        # but a release tag must never ship ad-hoc.
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_SIGN_P12" ]; then
+            echo "SIGN_IDENTITY=$(bash packaging/macos/import_signing_identity.sh)" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "release build without MACOS_SIGN_P12 secret"; exit 1
+          else
+            echo "no signing secret: ad-hoc signature"
+          fi
       - name: Bundle app + disk image
         run: bash packaging/macos/build_app.sh
       - name: Smoke test (bundle)
