@@ -197,6 +197,8 @@ checksum** against the release and installs it:
 - **macOS** replaces CineRemote.app after the app closes, then reopens it.
 - **Linux** replaces the AppImage file in place and restarts it.
 
+<p align="center"><img src="docs/images/update.png" alt="The update dialog with release notes" width="80%"></p>
+
 You can also check any time with **Help ▸ Check for updates**, or turn off automatic checks in the update dialog.
 Running from source, CineRemote tells you about new releases and you update with `git pull`.
 
