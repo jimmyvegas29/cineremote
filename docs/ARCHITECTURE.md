@@ -230,7 +230,7 @@ orange/red meter zones. The webcam is off for demo cameras; OBS output is on. RE
 | Kind | Asset (name contract with CI) | Apply |
 |---|---|---|
 | `windows` | `CineRemote-<v>-windows-x64-setup.exe` | Hidden PowerShell `Wait-Process` on the app's PID, then the Inno installer `/SILENT /SP- /NOCANCEL /CLOSEAPPLICATIONS /relaunch=1` (starting setup while the app was still closing made it roll back) |
-| `macos` | `CineRemote-<v>-macos-<arm64\|x86_64>.zip` | `ditto -x -k`, then a shell script swaps the `.app` after the app exits, clears quarantine, `open`s it |
+| `macos` | `CineRemote-<v>-macos-<arm64\|x86_64>.dmg` | Pre-check the install location (`macos_install_location()` resolves App Translocation via `SecTranslocateCreateOriginalPathForURL`; refuse a read-only/translocated target with "move to Applications"), `hdiutil attach` the image privately, `ditto` the app out, then a shell script swaps the `.app` after the app exits, clears quarantine, `open`s it; a failed swap leaves `cineremote-update-failed.txt` in the temp dir, shown on next start |
 | `appimage` | `CineRemote-<v>-linux-x86_64.AppImage` | Replace `$APPIMAGE` in place (`os.replace`), re-exec after exit |
 | `source` | - | Tell the user to `git pull` |
 
@@ -247,8 +247,8 @@ orange/red meter zones. The webcam is off for demo cameras; OBS output is on. RE
   OBS plugin in `ProgramData\obs-studio\plugins`, versioned webcam DLL registered with `regserver`,
   `ProgramData\CineRemote` ACL via icacls (LocalService modify), `[Code] Relaunch` for `/relaunch=1`.
 - Linux `packaging/linux/build_appimage.sh` (appimagetool, extract-and-run so no FUSE needed in CI);
-  macOS `packaging/macos/build_app.sh` (ad-hoc codesign, `ditto` zip for the updater) then
-  `packaging/macos/build_dmg.sh` (drag-to-Applications disk image: Applications symlink, HiDPI background
+  macOS `packaging/macos/build_app.sh` (ad-hoc codesign) then `packaging/macos/build_dmg.sh` (the one
+  macOS download, also what the updater installs - a drag-to-Applications disk image: Applications symlink, HiDPI background
   from `tools/make_dmg_background.py`, volume icon, Finder layout via AppleScript - skipped with a default
   layout where Finder can't be scripted, e.g. over SSH).
 - `.github/workflows/build.yml`: Windows (2022), Ubuntu 22.04 (oldest glibc for the AppImage),

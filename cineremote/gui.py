@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         self.updates.result.connect(self._on_update_check)
         self._manual_update_check = False
         QTimer.singleShot(5000, self.updates.check_if_due)
+        QTimer.singleShot(1500, self._report_failed_update)
 
         QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.set_view("studio"))
         QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.set_view("camera"))
@@ -493,6 +494,11 @@ class MainWindow(QMainWindow):
         self._manual_update_check = True
         self.status.showMessage("Checking for updates…", 4000)
         self.updates.check()
+
+    def _report_failed_update(self):
+        msg = updater.take_failed_update_message()
+        if msg:
+            QMessageBox.warning(self, APP_NAME, msg)
 
     def show_update(self):
         if self.updates.latest and self.updates.latest["newer"]:

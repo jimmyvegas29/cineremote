@@ -76,6 +76,13 @@ class UpdateDialog(QDialog):
                              "(and <code>pip install -r requirements.txt</code>).")
         elif not info.get("asset"):
             self.msg.setText("This release has no download for your platform yet - see the release page.")
+        blocked = None
+        if kind == "macos":
+            try:
+                updater.macos_preflight()       # e.g. opened straight from Downloads (App Translocation)
+            except updater.UpdateError as e:
+                blocked = str(e)
+                self.msg.setText(blocked)
         auto = QCheckBox("Check for updates automatically")
         auto.setChecked(checker.auto)
         auto.toggled.connect(checker.set_auto)
@@ -87,7 +94,7 @@ class UpdateDialog(QDialog):
         later.clicked.connect(self.reject)
         self.install = QPushButton("Install and restart")
         self.install.setDefault(True)
-        self.install.setEnabled(kind != "source" and bool(info.get("asset")))
+        self.install.setEnabled(kind != "source" and bool(info.get("asset")) and not blocked)
         self.install.clicked.connect(self._start)
         row.addWidget(page)
         row.addStretch(1)

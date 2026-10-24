@@ -4,7 +4,7 @@ The app asks the GitHub API for the latest release, compares its tag with __vers
 runs as a packaged build, downloads the matching asset and installs it:
 
   Windows   CineRemote-<ver>-windows-x64-setup.exe   run silently; the installer closes and relaunches the app
-  macOS     CineRemote-<ver>-macos-<arch>.zip        the .app bundle is swapped in place after the app quits
+  macOS     CineRemote-<ver>-macos-<arch>.dmg        the .app is copied out and swapped in place after the app quits
   Linux     CineRemote-<ver>-linux-x86_64.AppImage   replaces the running AppImage file, then re-executes it
 
 Running from a source checkout, it only reports the new version (update with `git pull`).
@@ -59,7 +59,7 @@ def install_kind():
 
 
 def _app_bundle():
-    """/Applications/CineRemote.app when running from inside a bundle, else None."""
+    """The .app bundle this process runs from (e.g. /Applications/CineRemote.app), else None."""
     p = os.path.abspath(sys.executable)
     while p != os.path.dirname(p):
         if p.endswith(".app"):
@@ -68,13 +68,68 @@ def _app_bundle():
     return None
 
 
+def _untranslocate(path):
+    """macOS runs a quarantined app that the Finder didn't move (e.g. opened straight from Downloads) from a
+    random read-only copy under .../AppTranslocation/. Updating that copy fails, so ask the Security
+    framework for the original location (what Sparkle does). Returns path unchanged if not translocated,
+    None if the original can't be determined."""
+    if "/AppTranslocation/" not in path:
+        return path
+    try:
+        import ctypes
+        import ctypes.util
+        cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+        sec = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Security"))
+        cf.CFURLCreateFromFileSystemRepresentation.restype = ctypes.c_void_p
+        cf.CFURLCreateFromFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long,
+                                                              ctypes.c_bool]
+        cf.CFURLGetFileSystemRepresentation.restype = ctypes.c_bool
+        cf.CFURLGetFileSystemRepresentation.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_char_p, ctypes.c_long]
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        sec.SecTranslocateCreateOriginalPathForURL.restype = ctypes.c_void_p
+        sec.SecTranslocateCreateOriginalPathForURL.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        raw = path.encode()
+        url = cf.CFURLCreateFromFileSystemRepresentation(None, raw, len(raw), True)
+        orig = sec.SecTranslocateCreateOriginalPathForURL(url, None) if url else None
+        if url:
+            cf.CFRelease(url)
+        if not orig:
+            return None
+        buf = ctypes.create_string_buffer(4096)
+        ok = cf.CFURLGetFileSystemRepresentation(orig, True, buf, len(buf))
+        cf.CFRelease(orig)
+        return buf.value.decode() if ok else None
+    except Exception:
+        return None
+
+
+def macos_install_location():
+    """Where the running app is installed - the bundle the update must replace (see _untranslocate)."""
+    app = _app_bundle()
+    return _untranslocate(app) if app else None
+
+
+FAILED_MARKER = os.path.join(tempfile.gettempdir(), "cineremote-update-failed.txt")
+
+
+def take_failed_update_message():
+    """Message left by an update that couldn't be installed after the app quit (shown once on next start)."""
+    try:
+        with open(FAILED_MARKER, encoding="utf-8") as f:
+            msg = f.read().strip()
+        os.remove(FAILED_MARKER)
+        return msg or None
+    except OSError:
+        return None
+
+
 def asset_pattern():
     kind = install_kind()
     if kind == "windows":
         return re.compile(r"CineRemote-.*-windows-x64-setup\.exe$")
     if kind == "macos":
         arch = "arm64" if platform.machine() == "arm64" else "x86_64"
-        return re.compile(rf"CineRemote-.*-macos-{arch}\.zip$")
+        return re.compile(rf"CineRemote-.*-macos-{arch}\.dmg$")
     if kind == "appimage":
         return re.compile(r"CineRemote-.*-linux-x86_64\.AppImage$")
     return None
@@ -173,18 +228,50 @@ def windows_installer_command(path, pid, relaunch=True):
     return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps]
 
 
+MOVE_TO_APPLICATIONS = ("Move CineRemote.app into your Applications folder (drag it there in the Finder), open it "
+                        "from there and update again.")
+
+
+def macos_preflight():
+    """Raise UpdateError, before the app quits, if the update couldn't replace the installed bundle."""
+    app = macos_install_location()
+    if app is None or "/AppTranslocation/" in app:
+        raise UpdateError("macOS is running CineRemote from a temporary read-only copy, so it can't be updated "
+                          "in place. " + MOVE_TO_APPLICATIONS)
+    parent = os.path.dirname(app)
+    if not os.access(parent, os.W_OK) or not os.access(app, os.W_OK):
+        raise UpdateError(f"No permission to replace CineRemote in {parent}. " + MOVE_TO_APPLICATIONS)
+    return app
+
+
 def _apply_macos(path, relaunch=True):
-    app = _app_bundle()
-    stage = os.path.join(os.path.dirname(path), "stage")
-    # ditto (not zipfile) keeps the executable bits, symlinks and signature of the bundle
-    subprocess.run(["ditto", "-x", "-k", path, stage], check=True)
-    new = next((os.path.join(stage, n) for n in os.listdir(stage) if n.endswith(".app")), None)
-    if not new:
-        raise UpdateError("the download has no .app inside")
-    # Swap after this process exits, then start the new copy.
+    app = macos_preflight()
+    work = os.path.dirname(path)
+    stage, mnt = os.path.join(work, "stage"), os.path.join(work, "mnt")
+    os.makedirs(stage, exist_ok=True)
+    # The release .dmg: mount it privately, copy the app out (ditto keeps permissions, symlinks and the
+    # signature), unmount.
+    subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mnt, path],
+                   check=True, stdout=subprocess.DEVNULL)
+    try:
+        src = next((os.path.join(mnt, n) for n in os.listdir(mnt) if n.endswith(".app")), None)
+        if not src:
+            raise UpdateError("the download has no .app inside")
+        new = os.path.join(stage, os.path.basename(src))
+        subprocess.run(["ditto", src, new], check=True)
+    finally:
+        subprocess.run(["hdiutil", "detach", "-quiet", mnt], check=False)
+    # Swap after this process exits, then start the (new, or on failure the old) copy. A failed swap
+    # leaves a note the app shows on its next start instead of failing silently.
+    fail = f"The update couldn't replace {app}. " + MOVE_TO_APPLICATIONS
     script = (f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.3; done\n'
-              f'rm -rf "{app}.old" && mv "{app}" "{app}.old" && mv "{new}" "{app}" && rm -rf "{app}.old"\n'
-              f'xattr -dr com.apple.quarantine "{app}" 2>/dev/null\n'
+              f'rm -rf "{app}.old"\n'
+              f'if mv "{app}" "{app}.old" && mv "{new}" "{app}"; then\n'
+              f'  rm -rf "{app}.old"; xattr -dr com.apple.quarantine "{app}" 2>/dev/null\n'
+              f'else\n'
+              f'  [ -e "{app}" ] || mv "{app}.old" "{app}"\n'
+              f'  printf "%s" "{fail}" > "{FAILED_MARKER}"\n'
+              f'fi\n'
               + (f'open "{app}"\n' if relaunch else ""))
     subprocess.Popen(["/bin/sh", "-c", script], start_new_session=True, close_fds=True)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build dist/CineRemote-<version>-macos-<arch>.dmg from dist/CineRemote.app: a drag-to-Applications window
-# (app icon, arrow, Applications link) for people. The .zip next to it stays: the in-app updater uses it.
+# (app icon, arrow, Applications link). Also what the in-app updater installs (it mounts the image).
 # Run from the repository root after packaging/macos/build_app.sh (or call this from it).
 set -euo pipefail
 VERSION=$(python3 -c 'import re;print(re.search(r"__version__ = \"(.+?)\"", open("cineremote/__init__.py").read()).group(1))')

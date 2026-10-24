@@ -1,2 +1,2 @@
 """CineRemote - remote control and live monitoring for the Blackmagic Camera app."""
-__version__ = "1.1.3"
+__version__ = "1.1.4"

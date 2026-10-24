@@ -34,7 +34,7 @@ Native parts: `obs-plugin\build.bat` / `build_linux.sh` / `OBS_UNIVERSAL=1 build
 - **OBS shared memory:** `obs_shm.py` layout and `obs-plugin/src/cineremote-shm.h` must match byte for
   byte; plugin source id `cineremote_camera` (changing it breaks users' OBS scenes).
 - **Updater contract:** release asset names (`CineRemote-<v>-windows-x64-setup.exe`,
-  `-macos-arm64.zip`, `-macos-x86_64.zip`, `-linux-x86_64.AppImage`, `SHA256SUMS.txt`) are matched by
+  `-macos-arm64.dmg`, `-macos-x86_64.dmg`, `-linux-x86_64.AppImage`, `SHA256SUMS.txt`) are matched by
   `updater.asset_pattern()`. Rename one side only together with the other, and remember old installs
   still look for the old names.
 - **Outputs stay clean:** monitoring tools and overlays draw only in the app's views, never into frames
@@ -57,7 +57,7 @@ Native parts: `obs-plugin\build.bat` / `build_linux.sh` / `OBS_UNIVERSAL=1 build
 5. `.github/workflows/build.yml` builds Windows, Linux, macOS arm64 + Intel, smoke-tests each, and the
    `release` job publishes all files + `SHA256SUMS.txt`. The tag must equal `__version__` or the release
    job fails. Watch with `gh run watch <id> -R jimmyvegas29/cineremote --exit-status`.
-6. Check `gh release view vx.y.z -R jimmyvegas29/cineremote` lists 10 assets, then test the update from
+6. Check `gh release view vx.y.z -R jimmyvegas29/cineremote` lists 8 assets, then test the update from
    the previous version (`CineRemote --update-now`, or the Update available button).
 
 Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the current model).

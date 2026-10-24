@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.4
+
+- **macOS:** releases ship only the `.dmg` now (no separate `.zip`), and the in-app updater installs from it.
+  **On 1.1.3 or earlier, download this `.dmg` by hand once**; updates are automatic from here on.
+- **macOS:** fixed updates that said they worked but left the old version running: when CineRemote is opened
+  straight from Downloads, macOS runs it from a temporary read-only copy, so the swap failed silently. The
+  updater now finds the real install location, tells you up front if it can't replace the app (and to move it
+  to Applications), and reports a failed swap on the next start instead of hiding it.
+
 ## 1.1.3
 
 - Fixed the recording timecode. It stayed at 00:00:00:00 while recording (Pixel) or showed a huge number

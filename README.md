@@ -96,8 +96,7 @@ Download the file for your computer from the
 | **Linux** (x86-64) | `CineRemote-<version>-linux-x86_64.AppImage` | `chmod +x CineRemote-*.AppImage`, then run it. |
 
 Not sure which Mac you have? Apple menu ▸ **About This Mac**: "Chip: Apple M…" = Apple Silicon,
-"Processor: Intel" = Intel. (The `.zip` files next to the `.dmg`s hold the same app; the in-app updater uses
-them.)
+"Processor: Intel" = Intel.
 
 The OBS source on macOS and Linux is a separate download from the same release: `cineremote-obs-<version>-macos-universal.zip`
 and `cineremote-obs-<version>-linux-x86_64.tar.gz` ([installing it](#obs-studio)). Every release lists
@@ -201,7 +200,9 @@ appears in the top bar. It shows the release notes, then downloads the update, v
 checksum** against the release and installs it:
 
 - **Windows** runs the new installer silently and reopens CineRemote.
-- **macOS** replaces CineRemote.app after the app closes, then reopens it.
+- **macOS** copies the new CineRemote.app out of the release's disk image, swaps it in after the app closes,
+  then reopens it. Keep CineRemote in **Applications**: a copy opened straight from Downloads runs from a
+  temporary read-only location macOS makes, and can't update itself.
 - **Linux** replaces the AppImage file in place and restarts it.
 
 <p align="center"><img src="docs/images/update.png" alt="The update dialog with release notes" width="80%"></p>
