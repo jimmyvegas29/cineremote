@@ -26,6 +26,8 @@ class CameraHud(context: Context) : View(context) {
     var deviceName = ""
     var connected = false
     var onParamChanged: (Any?) -> Unit = {}
+    var gridOn = false
+        private set
 
     private val d = resources.displayMetrics.density
     private fun dp(v: Float) = v * d
@@ -120,6 +122,8 @@ class CameraHud(context: Context) : View(context) {
         val infoW = smallP.measureText(info)
         c.drawText(info, rx - infoW, dp(23f), smallP)
         rx -= infoW + dp(14f)
+        // recording format: resolution + aspect (what you're recording in)
+        rx = drawFormat(c, rx)
         for (p in rightGroup.reversed()) rx = drawReadoutRight(c, p, rx, barH)
 
         // timecode centered
@@ -132,6 +136,7 @@ class CameraHud(context: Context) : View(context) {
         // connection dot (far top-left)
         c.drawCircle(dp(6f), dp(14f), dp(3f), paint(if (connected) Color.rgb(0x8A, 0xE2, 0x8A) else Color.argb(110, 200, 200, 200)))
 
+        if (gridOn) drawGrid(c, w)
         drawRightRail(c, w)
         selected?.let { drawRuler(c, w, it) }
         drawReticle(c)
@@ -149,6 +154,23 @@ class CameraHud(context: Context) : View(context) {
         return x + wv + dp(18f)
     }
 
+    /** Non-tappable format readout: resolution (1080p / 2160p) + aspect ratio, like the Blackmagic app. */
+    private fun drawFormat(c: Canvas, rightX: Float): Float {
+        val s = engine.captureSize
+        val res = when { s.height >= 2160 -> "4K"; s.height >= 1440 -> "${s.height}p"; else -> "${s.height}p" }
+        val value = "$res  ${aspect(s.width, s.height)}"
+        val wv = maxOf(valueP.measureText(value), labelP.measureText("FORMAT"))
+        val x = rightX - wv
+        c.drawText("FORMAT", x, dp(13f), labelP)
+        c.drawText(value, x, dp(28f), valueP)
+        return x - dp(18f)
+    }
+    private fun aspect(w: Int, h: Int): String {
+        val r = w.toFloat() / h
+        return when { kotlin.math.abs(r - 16f / 9) < 0.03f -> "16:9"; kotlin.math.abs(r - 4f / 3) < 0.03f -> "4:3"
+            kotlin.math.abs(r - 2.39f) < 0.03f -> "2.39:1"; kotlin.math.abs(r - 17f / 9) < 0.03f -> "17:9"; else -> "%.2f:1".format(r) }
+    }
+
     private fun drawReadoutRight(c: Canvas, p: P, rightX: Float, barH: Float): Float {
         val v = value(p)
         val vp = if (selected == p) valueSelP else valueP
@@ -160,10 +182,13 @@ class CameraHud(context: Context) : View(context) {
         return x - dp(16f)
     }
 
+    private val funcRects = HashMap<String, RectF>()
+
     private fun drawRightRail(c: Canvas, w: Float) {
         val cx = w - dp(28f)
-        // record button, vertically centered
         val cy = height / 2f
+        funcRects.clear()
+        // record button, vertically centered
         val rad = dp(22f)
         recRect = RectF(cx - rad, cy - rad, cx + rad, cy + rad)
         c.drawCircle(cx, cy, rad, paint(Color.argb(60, 0, 0, 0)))
@@ -171,9 +196,25 @@ class CameraHud(context: Context) : View(context) {
         val red = Color.rgb(0xE5, 0x32, 0x2D)
         if (recorder.isRecording) { val s = dp(11f); c.drawRoundRect(RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), dp(2f), dp(2f), paint(red)) }
         else c.drawCircle(cx, cy, dp(15f), paint(red))
-        // settings gear (bottom-right)
-        setRect = RectF(w - dp(52f), height - dp(48f), w, height.toFloat())
-        c.drawText("⚙", w - dp(34f), height - dp(18f), tp(Color.argb(220, 230, 230, 230), 18f, false))
+        // function toggles above the record button
+        val gap = dp(44f)
+        funcButton(c, cx, cy - rad - gap, "GRID", gridOn)
+        funcButton(c, cx, cy - rad - gap * 2, "STAB", engine.stabilization)
+        if (engine.hasTorch) funcButton(c, cx, cy - rad - gap * 3, "FLASH", engine.torch)
+        // settings gear below the record button
+        val gy = cy + rad + gap
+        funcRects["SET"] = RectF(cx - dp(18f), gy - dp(18f), cx + dp(18f), gy + dp(18f))
+        c.drawText("⚙", cx - dp(9f), gy + dp(7f), tp(Color.argb(230, 230, 230, 230), 20f, false))
+        setRect = funcRects["SET"]!!
+    }
+
+    private fun funcButton(c: Canvas, cx: Float, cy: Float, label: String, active: Boolean) {
+        val r = dp(18f)
+        val rect = RectF(cx - r, cy - r, cx + r, cy + r)
+        c.drawCircle(cx, cy, r, paint(if (active) Color.argb(230, 0x4D, 0x9B, 0xFF) else Color.argb(110, 24, 26, 30)))
+        val lp = tp(if (active) Color.WHITE else Color.argb(220, 210, 214, 220), 8.5f, true)
+        c.drawText(label, cx - lp.measureText(label) / 2, cy + dp(3f), lp)
+        funcRects[label] = rect
     }
 
     private fun tcText(): String {
@@ -212,6 +253,13 @@ class CameraHud(context: Context) : View(context) {
         rulerRect = RectF(left, top, w - dp(52f), height.toFloat())
     }
 
+    private fun drawGrid(c: Canvas, w: Float) {
+        val g = paint(Color.argb(70, 255, 255, 255)).apply { style = Paint.Style.STROKE; strokeWidth = dp(1f) }
+        val h = height.toFloat()
+        c.drawLine(w / 3, 0f, w / 3, h, g); c.drawLine(2 * w / 3, 0f, 2 * w / 3, h, g)
+        c.drawLine(0f, h / 3, w, h / 3, g); c.drawLine(0f, 2 * h / 3, w, 2 * h / 3, g)
+    }
+
     private fun drawReticle(c: Canvas) {
         val f = focus ?: return
         if (now() > focusUntil) { focus = null; return }
@@ -229,8 +277,11 @@ class CameraHud(context: Context) : View(context) {
         val x = e.x; val y = e.y
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (setRect.contains(x, y)) { onSettings(); return true }
+                if (funcRects["SET"]?.contains(x, y) == true) { onSettings(); return true }
                 if (recRect.contains(x, y)) { onRecordToggle(); invalidate(); return true }
+                funcRects["GRID"]?.let { if (it.contains(x, y)) { gridOn = !gridOn; invalidate(); return true } }
+                funcRects["STAB"]?.let { if (it.contains(x, y)) { engine.stabilization = !engine.stabilization; engine.apply(); onParamChanged(null); invalidate(); return true } }
+                funcRects["FLASH"]?.let { if (it.contains(x, y)) { engine.torch = !engine.torch; engine.apply(); onParamChanged(null); invalidate(); return true } }
                 val s = selected
                 if (s != null && s.auto && autoRect.contains(x, y)) { toggleAuto(s); invalidate(); return true }
                 if (s != null && rulerRect.contains(x, y)) { drag = s; dragX = x; dragIdx = curIndex(s, choices(s)); return true }
