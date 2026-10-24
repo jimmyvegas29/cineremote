@@ -18,6 +18,7 @@ import kotlin.math.roundToInt
 class CameraController(
     private val engine: CameraEngine,
     private val recorder: Recorder,
+    private val takes: Takes,
     private val prefs: Prefs,
     private val batteryPct: () -> Float,
     private val send: (SubordinateMessage) -> Unit,
@@ -232,14 +233,15 @@ class CameraController(
             recordingState = recordingState()
         }
         "recording_format" -> prop(PropertyId.PROPERTY_ID_RECORDING_FORMAT) {
-            recordingFormat = CamRecordingFormatProperty.newBuilder().setWidth(1920).setHeight(1080)
-                .setColorSpace(ColorSpace.COLOR_SPACE_REC709).build()
+            val f = engine.format
+            recordingFormat = CamRecordingFormatProperty.newBuilder().setWidth(f.width).setHeight(f.height)
+                .setIsOpenGate(f.isOpenGate).setColorSpace(ColorSpace.COLOR_SPACE_REC709).build()
         }
         "battery" -> prop(PropertyId.PROPERTY_ID_BATTERY) {
             battery = BatteryProperty.newBuilder().setAvailablePercentage(batteryPct()).build()
         }
         "active_storage" -> prop(PropertyId.PROPERTY_ID_ACTIVE_STORAGE) {
-            val (total, free, runtime) = recorder.storage()
+            val (total, free, runtime) = recorder.storage(takes.config().bitrate)
             activeStorage = ActiveStorageProperty.newBuilder().setStorageDevice(
                 StorageDevice.newBuilder().setName("Internal").setIsInternal(true)
                     .setTotalSizeBytes(total).setFreeSizeBytes(free).setRuntimeSecs(runtime)).build()
@@ -353,25 +355,10 @@ class CameraController(
     }
 
     // ------------------------------------------------------------------ recording
-    @Volatile private var recordingActive = false
+    // Takes notifies MainActivity when a take really starts/ends, which emits recording_state to us.
+    private fun startRecording(): Boolean = takes.start()
 
-    private fun startRecording(): Boolean {
-        if (recordingActive) return true
-        val surface = recorder.prepare(engine.fps, engine.captureSize, engine.uprightDegrees) ?: return false
-        recordingActive = true
-        // Add the recorder surface to the camera, then start the recorder once it's receiving frames.
-        engine.setRecordSurface(surface) { recorder.start(); emitRecordingState() }
-        return true
-    }
-
-    private fun stopRecording() {
-        if (!recordingActive) return
-        recordingActive = false
-        // Remove the surface from the camera first, then finalize the file.
-        engine.setRecordSurface(null) { recorder.stop(); emitRecordingState() }
-    }
-
-    fun forceStopRecording() { if (recordingActive) stopRecording() }
+    private fun stopRecording() = takes.stop()
 
     private fun fieldFor(id: PropertyId): String? = ID_TO_FIELD[id]
 

@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.hardware.camera2.CameraCharacteristics
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.abs
@@ -19,35 +20,50 @@ import kotlin.math.sin
  * The on-phone camera screen, laid out like the Blackmagic Camera app:
  *  - the picture letterboxed on the left; label/value readouts across its top (LENS FPS SHUTTER IRIS ·
  *    timecode · ISO WB TINT · format badge) with blue "A" badges for automatic values
- *  - histogram, media (record time left / storage) and audio meter panels along its bottom
- *  - a tool column (frame guides, autofocus, exposure, torch, record, lens/zoom, stabilisation, flip)
- *    and a nav rail (Camera, Media, Remote, Settings) on the right
- * Geometry comes from a 2424x1080 reference screenshot: tool/nav sizes scale with screen height ([u]),
- * everything on the picture scales with the picture width ([s], reference 1855 px).
- * Tap a readout (or the exposure / autofocus / lens tool) to edit it on a ruler; tap the picture to focus.
+ *  - histogram, media (record time left / storage) and audio meter panels along its bottom; tap the
+ *    histogram for an RGB parade, the audio meter for a big meter with Audio Gain
+ *  - a tool column (frame guides, autofocus, exposure, record, lens/zoom, stabilisation, flip) and a nav
+ *    rail (Camera, Media, Remote, Settings) on the right
+ * Tap a readout or tool to edit it in the editor panel at the bottom (rulers, preset buttons, AUTO, locks).
+ * Geometry comes from a 2424x1080 reference screenshot: tool/nav sizes scale with screen height ([u]); the
+ * overlays scale with the largest 16:9 frame that fits ([s], reference 1855 px wide), and the picture is
+ * fitted inside that frame at the recording format's aspect ratio.
  */
 class CameraHud(context: Context) : View(context) {
 
     lateinit var engine: CameraEngine
     lateinit var recorder: Recorder
-    var meter: AudioMeter? = null
+    lateinit var prefs: Prefs
+    var audio: AudioInput? = null
     var histogram: () -> Array<FloatArray>? = { null }
+    var recording: () -> Boolean = { false }
+    var plannedBitrate: () -> Int = { 20_000_000 }
     var onRecordToggle: () -> Unit = {}
-    var onSettings: () -> Unit = {}
+    var onSettings: (page: String?) -> Unit = {}
     var onMedia: () -> Unit = {}
     var onRemote: () -> Unit = {}
     var onParamChanged: (Any?) -> Unit = {}
-    /** The picture's rectangle in this view; MainActivity places the preview SurfaceView there. */
+    var onGainChanged: (Int) -> Unit = {}
+    /** The picture's rectangle in this view; MainActivity places the preview view there. */
     var onPreviewRect: (Rect) -> Unit = {}
-    var deviceName = ""
     var connected = false
     var battery = 100
+    var settingsOpen = false
     var captureAspect = 16f / 9f
         set(v) { if (abs(v - field) > 0.001f) { field = v; layoutGeometry() } }
 
-    var guidesOn = false
-        private set
+    // ---- overlay state
+    private var guidesOn = false            // tool-column guides button: shows the guides toolbar
+    private var guideTool = GuideTool.FRAME
+    private var frameGuide: String? = null  // "2.39:1" etc
+    private var safeArea = 0                // percent, 0 = off
+    private var grid = Grid.OFF
     private var panelsOn = true
+    private var expanded: Expanded? = null  // a bottom panel opened up
+
+    private enum class GuideTool { TORCH, SAFE, FRAME, GRID }
+    private enum class Grid(val label: String) { OFF("Off"), THIRDS("Thirds"), CROSS("Crosshair"), DOT("Centre dot"), THIRDS_CROSS("Thirds +") }
+    private enum class Expanded { AUDIO, HISTOGRAM }
 
     // ------------------------------------------------------------------ look
     private val lato = resources.getFont(R.font.lato_regular)
@@ -71,14 +87,16 @@ class CameraHud(context: Context) : View(context) {
         color = c; textSize = size; typeface = face
         if (shadow) setShadowLayer(size * 0.12f, 0f, size * 0.04f, Color.argb(150, 0, 0, 0)) else clearShadowLayer()
     }
+    private fun centered(c: Canvas, t: String, cx: Float, baseline: Float) = c.drawText(t, cx - text.measureText(t) / 2, baseline, text)
 
     // ------------------------------------------------------------------ geometry
     private var u = 1f                  // screen height / 1080
-    private var s = 1f                  // picture width / 1855
-    private val pv = RectF()            // picture rectangle
+    private var s = 1f                  // overlay frame width / 1855
+    private val frame = RectF()         // the 16:9 overlay frame
+    private val pv = RectF()            // the picture (recording aspect, inside the frame)
     private var toolX = 0f; private var navX = 0f
-    private fun x(rx: Float) = pv.left + rx * s
-    private fun y(ry: Float) = pv.top + ry * s
+    private fun x(rx: Float) = frame.left + rx * s
+    private fun y(ry: Float) = frame.top + ry * s
     private val tx get() = toolX + 100 * u
     private val nx get() = navX + 78 * u
 
@@ -89,14 +107,18 @@ class CameraHud(context: Context) : View(context) {
         u = height / 1080f
         navX = width - 194 * u
         toolX = navX - 202 * u
-        val maxH = height - 36 * u
-        var pw = toolX
-        var ph = pw / captureAspect
-        if (ph > maxH) { ph = maxH; pw = ph * captureAspect }
-        val left = (toolX - pw) / 2
-        val top = (height - ph) / 2
-        pv.set(left, top, left + pw, top + ph)
-        s = pw / 1855f
+        fun fit(aspect: Float, out: RectF) {
+            val maxH = height - 36 * u
+            var w = toolX; var h = w / aspect
+            if (h > maxH) { h = maxH; w = h * aspect }
+            out.set((toolX - w) / 2, (height - h) / 2, (toolX + w) / 2, (height + h) / 2)
+        }
+        fit(16f / 9f, frame)
+        s = frame.width() / 1855f
+        // the picture fills the frame's width or height, whichever its aspect allows
+        var pw = frame.width(); var ph = pw / captureAspect
+        if (ph > frame.height()) { ph = frame.height(); pw = ph * captureAspect }
+        pv.set(frame.centerX() - pw / 2, frame.centerY() - ph / 2, frame.centerX() + pw / 2, frame.centerY() + ph / 2)
         onPreviewRect(Rect(pv.left.roundToInt(), pv.top.roundToInt(), pv.right.roundToInt(), pv.bottom.roundToInt()))
         invalidate()
     }
@@ -106,7 +128,7 @@ class CameraHud(context: Context) : View(context) {
         LENS("LENS", 38f, false), FPS("FPS", 205f, false), SHUTTER("SHUTTER", 340f, true), IRIS("IRIS", 568f, false),
         ISO("ISO", 1188f, true), WB("WB", 1319f, true), TINT("TINT", 1507f, false),
         // edited from the tool column, no top readout
-        EV("EXPOSURE", -1f, true), FOCUS("FOCUS", -1f, true), ZOOM("ZOOM", -1f, false)
+        EV("EXPOSURE", -1f, true), FOCUS("FOCUS", -1f, true)
     }
     private val readouts = listOf(P.LENS, P.FPS, P.SHUTTER, P.IRIS, P.ISO, P.WB, P.TINT)
     private var selected: P? = null
@@ -123,7 +145,6 @@ class CameraHud(context: Context) : View(context) {
         P.TINT -> signed(engine.tint)
         P.EV -> engine.evStops.let { if (abs(it) < 0.05f) "0.0" else "%+.1f".format(it) }
         P.FOCUS -> if (engine.afAuto) "AF" else "%.2f".format(engine.focus01)
-        P.ZOOM -> fmtX(engine.zoom)
     }
     private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
     private fun fmtX(z: Float) = (if (abs(z - z.roundToInt()) < 0.05f) "%.0f".format(z) else "%.1f".format(z)) + "x"
@@ -133,36 +154,46 @@ class CameraHud(context: Context) : View(context) {
         P.EV -> autoExposure; P.FOCUS -> engine.afAuto; else -> false
     }
 
-    private fun choices(p: P): List<Pair<String, () -> Unit>> = when (p) {
-        P.LENS -> engine.lenses.map { l ->
-            (if (l.facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) "Front ${l.equivMm}mm"
-             else "${l.equivMm}mm") to { engine.switchLens(l.id) } }
-        P.FPS -> engine.fpsChoices.ifEmpty { listOf(30) }.map { f -> "$f" to { engine.selectFps(f) } }
-        P.SHUTTER -> SHUTTER_DENS.filter { it in engine.fps..8000 }.map { d -> "1/$d" to { engine.shutterAuto = false; engine.shutterDen = d } }
-        P.ISO -> CameraEngine.ISO_STOPS.filter { it in engine.isoRange.lower..engine.isoRange.upper }.map { v -> "$v" to { engine.isoAuto = false; engine.iso = v } }
-        P.WB -> (2500..10000 step 100).map { k -> "${k}K" to { engine.wbAuto = false; engine.kelvin = k } }
-        P.TINT -> (-50..50 step 5).map { t -> signed(t) to { engine.tint = t } }
-        P.EV -> (-30..30).map { i -> val e = i / 10f; (if (i == 0) "0.0" else "%+.1f".format(e)) to { engine.evStops = e } }
-        P.FOCUS -> (0..20).map { i -> "%.2f".format(i / 20f) to { engine.afAuto = false; engine.focusLockedByTap = false; engine.focus01 = i / 20f } }
-        P.ZOOM -> { val r = engine.zoomRange; val n = ((r.upper - r.lower) / 0.1f).toInt().coerceIn(1, 120)
-            (0..n).map { i -> val z = r.lower + i * 0.1f; fmtX(z) to { engine.zoom = z } } }
-        P.IRIS -> emptyList()
-    }
-    private fun curIndex(p: P, items: List<Pair<String, () -> Unit>>): Int {
-        val cur = if (p == P.LENS) engine.lens.let { l -> engine.lenses.indexOf(l) } else items.indexOfFirst { it.first == value(p) }
-        return if (cur >= 0) cur else items.size / 2
-    }
-
     private fun toggleAuto(p: P) {
         when (p) {
             P.ISO -> engine.isoAuto = !engine.isoAuto
             P.SHUTTER -> engine.shutterAuto = !engine.shutterAuto
-            P.WB -> engine.wbAuto = !engine.wbAuto
-            P.EV -> { val on = !autoExposure; engine.isoAuto = on; engine.shutterAuto = on }
+            P.WB -> { engine.wbAuto = !engine.wbAuto; engine.awbLock = false }
+            P.EV -> { val on = !autoExposure; engine.isoAuto = on; engine.shutterAuto = on; engine.aeLock = false }
             P.FOCUS -> { engine.afAuto = !engine.afAuto; engine.focusLockedByTap = false }
             else -> {}
         }
-        engine.apply(); onParamChanged(null)
+        changed()
+    }
+
+    private fun changed() { engine.apply(); onParamChanged(null); invalidate() }
+
+    private class Item(val label: String, val on: Boolean, val act: () -> Unit)
+
+    private fun ruler(p: P): Pair<List<Item>, Int>? {
+        val cur = value(p)
+        val items: List<Pair<String, () -> Unit>> = when (p) {
+            P.FPS -> engine.fpsChoices.map { f -> "$f" to { engine.selectFps(f) } }
+            P.SHUTTER -> SHUTTER_DENS.filter { it in engine.fps..8000 }.map { d -> "1/$d" to { engine.shutterAuto = false; engine.shutterDen = d } }
+            P.WB -> (2500..10000 step 100).map { k -> "${k}K" to { engine.wbAuto = false; engine.kelvin = k } }
+            P.TINT -> (-50..50 step 5).map { t -> signed(t) to { engine.tint = t } }
+            P.EV -> (-30..30).map { i -> (if (i == 0) "0.0" else "%+.1f".format(i / 10f)) to { engine.evStops = i / 10f } }
+            P.FOCUS -> (0..20).map { i -> "%.2f".format(i / 20f) to { engine.afAuto = false; engine.focusLockedByTap = false; engine.focus01 = i / 20f } }
+            P.LENS -> { val r = engine.zoomRange; val n = ((r.upper - r.lower) / 0.1f).toInt().coerceIn(1, 120)
+                (0..n).map { i -> val z = r.lower + i * 0.1f; fmtX(z) to { engine.zoom = z } } }
+            else -> return null
+        }
+        if (items.isEmpty()) return null
+        val idx = if (p == P.LENS) items.indexOfFirst { it.first == fmtX(engine.zoom) } else items.indexOfFirst { it.first == cur }
+        return items.map { Item(it.first, false, it.second) } to (if (idx >= 0) idx else nearest(p, items.size))
+    }
+
+    /** Where the ruler sits when the live value isn't one of its steps (auto values drift). */
+    private fun nearest(p: P, n: Int): Int = when (p) {
+        P.SHUTTER -> SHUTTER_DENS.filter { it in engine.fps..8000 }.let { l ->
+            val d = engine.shutterDenFromNs(engine.liveExposureNs); l.indices.minByOrNull { abs(l[it] - d) } ?: 0 }
+        P.WB -> ((engine.liveKelvin - 2500) / 100).coerceIn(0, n - 1)
+        else -> n / 2
     }
 
     // ------------------------------------------------------------------ draw
@@ -173,17 +204,27 @@ class CameraHud(context: Context) : View(context) {
     fun showFocusReticle(nx: Float, ny: Float) { focus = floatArrayOf(nx, ny); focusUntil = now() + 1200; invalidate() }
 
     override fun onDraw(c: Canvas) {
-        if (!::engine.isInitialized || pv.isEmpty) return
+        if (!::engine.isInitialized || frame.isEmpty) return
+        buttons.clear(); rulers.clear(); sliders.clear()
         drawBackground(c)
-        if (guidesOn) drawGuides(c)
+        drawOverlays(c)
         drawReadouts(c)
         drawTimecode(c)
         drawFormatBadge(c)
         if (connected) drawRemoteIndicator(c)
         drawEdgeHandles(c)
         val sel = selected
-        if (sel != null) drawRuler(c, sel)
-        else if (panelsOn) { drawHistogramPanel(c); drawMediaPanel(c); drawAudioPanel(c) }
+        when {
+            sel != null -> drawEditor(c, sel)
+            guidesOn -> drawGuidesBar(c)
+            expanded == Expanded.AUDIO -> drawAudioExpanded(c)
+            expanded == Expanded.HISTOGRAM -> drawParade(c)
+            panelsOn -> {
+                if (prefs.showHistogram) drawHistogramPanel(c)
+                if (prefs.showStorage) drawMediaPanel(c)
+                if (prefs.showAudioMeters) drawAudioPanel(c)
+            }
+        }
         drawReticle(c)
         drawToolColumn(c)
         drawNavRail(c)
@@ -201,13 +242,40 @@ class CameraHud(context: Context) : View(context) {
         c.drawRect(navX, 0f, width.toFloat(), height.toFloat(), fill)
     }
 
-    private fun drawGuides(c: Canvas) {
-        strokeC(Color.argb(110, 255, 255, 255), 1.5f * s)
-        val w = pv.width() / 3; val h = pv.height() / 3
-        for (i in 1..2) {
-            c.drawLine(pv.left + w * i, pv.top, pv.left + w * i, pv.bottom, stroke)
-            c.drawLine(pv.left, pv.top + h * i, pv.right, pv.top + h * i, stroke)
+    /** Frame guides (dimmed outside the guide ratio), safe area and grid, inside the picture. */
+    private fun drawOverlays(c: Canvas) {
+        val gA = (prefs.guidesOpacity * 255 / 100).coerceIn(30, 255)
+        frameGuide?.let { g ->
+            val r = GUIDE_RATIOS[g] ?: return@let
+            val pr = pv.width() / pv.height()
+            val inner = if (r > pr) { val h = pv.width() / r; RectF(pv.left, pv.centerY() - h / 2, pv.right, pv.centerY() + h / 2) }
+                        else { val w = pv.height() * r; RectF(pv.centerX() - w / 2, pv.top, pv.centerX() + w / 2, pv.bottom) }
+            fillC(Color.argb(gA * 3 / 4, 0, 0, 0))
+            c.drawRect(pv.left, pv.top, pv.right, inner.top, fill); c.drawRect(pv.left, inner.bottom, pv.right, pv.bottom, fill)
+            c.drawRect(pv.left, inner.top, inner.left, inner.bottom, fill); c.drawRect(inner.right, inner.top, pv.right, inner.bottom, fill)
+            strokeC(Color.argb(gA, 255, 255, 255), 2 * s); c.drawRect(inner, stroke)
         }
+        if (safeArea > 0) {
+            val k = safeArea / 100f
+            val w = pv.width() * k; val h = pv.height() * k
+            strokeC(Color.argb(gA, 255, 255, 255), 2 * s)
+            c.drawRect(pv.centerX() - w / 2, pv.centerY() - h / 2, pv.centerX() + w / 2, pv.centerY() + h / 2, stroke)
+        }
+        val grA = (prefs.gridsOpacity * 255 / 100).coerceIn(30, 255)
+        strokeC(Color.argb(grA, 255, 255, 255), 1.5f * s)
+        if (grid == Grid.THIRDS || grid == Grid.THIRDS_CROSS) {
+            val w = pv.width() / 3; val h = pv.height() / 3
+            for (i in 1..2) {
+                c.drawLine(pv.left + w * i, pv.top, pv.left + w * i, pv.bottom, stroke)
+                c.drawLine(pv.left, pv.top + h * i, pv.right, pv.top + h * i, stroke)
+            }
+        }
+        if (grid == Grid.CROSS || grid == Grid.THIRDS_CROSS) {
+            val k = 40 * s
+            c.drawLine(pv.centerX() - k, pv.centerY(), pv.centerX() + k, pv.centerY(), stroke)
+            c.drawLine(pv.centerX(), pv.centerY() - k, pv.centerX(), pv.centerY() + k, stroke)
+        }
+        if (grid == Grid.DOT) { fillC(Color.argb(grA, 255, 255, 255)); c.drawCircle(pv.centerX(), pv.centerY(), 6 * s, fill) }
     }
 
     private val readoutHit = HashMap<P, RectF>()
@@ -217,23 +285,26 @@ class CameraHud(context: Context) : View(context) {
         for (p in readouts) {
             val dim = p == P.IRIS
             val lx = x(p.rx)
+            textC(Color.WHITE, 25 * s, latoBold); val labelW = text.measureText(p.label)
+            textC(Color.WHITE, 43 * s, latoBold); val valueW = text.measureText(value(p))
+            val w = maxOf(valueW, labelW + if (p.autoCapable) 31 * s else 0f)
+            val box = RectF(lx - 12 * s, y(26f), lx + w + 12 * s, y(110f))
+            val sel = selected == p
+            if (sel) { fillC(accent); c.drawRoundRect(box, 8 * s, 8 * s, fill) }
             val labelColor = if (dim) Color.argb(150, 255, 255, 255) else Color.WHITE
-            textC(labelColor, 25 * s, latoBold, shadow = true)
+            textC(labelColor, 25 * s, latoBold, shadow = !sel)
             c.drawText(p.label, lx, y(55f), text)
-            val labelW = text.measureText(p.label)
-            if (isAuto(p)) drawABadge(c, lx + labelW + 11 * s, y(37f), 20 * s)
-            val v = value(p)
-            val vColor = when { dim -> Color.argb(150, 255, 255, 255); selected == p -> accent; else -> Color.WHITE }
-            textC(vColor, 43 * s, latoBold, shadow = true)
-            c.drawText(v, lx, y(97f), text)
-            val w = maxOf(text.measureText(v), labelW + 31 * s)
-            if (!dim) readoutHit[p] = RectF(lx - 16 * s, y(18f), lx + w + 16 * s, y(115f))
+            if (isAuto(p)) drawABadge(c, lx + labelW + 11 * s, y(37f), 20 * s, outlined = sel)
+            textC(if (dim) Color.argb(150, 255, 255, 255) else Color.WHITE, 43 * s, latoBold, shadow = !sel)
+            c.drawText(value(p), lx, y(97f), text)
+            if (!dim) readoutHit[p] = RectF(box.left - 6 * s, y(14f), box.right + 6 * s, y(118f))
         }
     }
 
-    private fun drawABadge(c: Canvas, left: Float, top: Float, size: Float) {
-        fillC(accent)
-        c.drawRoundRect(RectF(left, top, left + size, top + size), size * 0.16f, size * 0.16f, fill)
+    private fun drawABadge(c: Canvas, left: Float, top: Float, size: Float, outlined: Boolean = false) {
+        val r = RectF(left, top, left + size, top + size)
+        if (outlined) { strokeC(Color.WHITE, 1.8f * s); c.drawRoundRect(r, size * 0.16f, size * 0.16f, stroke) }
+        else { fillC(accent); c.drawRoundRect(r, size * 0.16f, size * 0.16f, fill) }
         textC(Color.WHITE, size * 0.8f, latoBlack)
         c.drawText("A", left + (size - text.measureText("A")) / 2, top + size * 0.79f, text)
     }
@@ -262,7 +333,10 @@ class CameraHud(context: Context) : View(context) {
         }
     }
 
+    private var badgeRect = RectF()
+
     private fun drawFormatBadge(c: Canvas) {
+        val f = engine.format
         val r = RectF(x(1636f), y(34f), x(1710f), y(98f))
         val rad = 9 * s
         val split = y(69f)
@@ -271,21 +345,11 @@ class CameraHud(context: Context) : View(context) {
         fillC(Color.WHITE); c.drawRoundRect(r, rad, rad, fill)
         c.restore()
         strokeC(Color.WHITE, 2.5f * s); c.drawRoundRect(r, rad, rad, stroke)
-        val sz = engine.captureSize
-        val res = when { sz.height >= 2160 -> "4K"; sz.height >= 1440 -> "2.5K"; sz.height >= 1080 -> "HD"; else -> "${sz.height}p" }
-        textC(Color.BLACK, 27 * s, latoBlack)
-        c.drawText(res, r.centerX() - text.measureText(res) / 2, y(63f), text)
-        val asp = aspect(sz.width, sz.height)
+        textC(Color.BLACK, (if (f.badge.length > 2) 22 else 27) * s, latoBlack)
+        centered(c, f.badge, r.centerX(), y(63f))
         textC(Color.WHITE, 17 * s, latoBold)
-        c.drawText(asp, r.centerX() - text.measureText(asp) / 2, y(91f), text)
-    }
-
-    private fun aspect(w: Int, h: Int): String {
-        val r = w.toFloat() / h
-        return when {
-            abs(r - 16f / 9) < 0.03f -> "16:9"; abs(r - 4f / 3) < 0.03f -> "4:3"
-            abs(r - 17f / 9) < 0.03f -> "17:9"; abs(r - 2.39f) < 0.03f -> "2.39:1"; else -> "%.2f:1".format(r)
-        }
+        centered(c, f.aspectName, r.centerX(), y(91f))
+        badgeRect = RectF(r.left - 20 * s, r.top - 15 * s, r.right + 20 * s, r.bottom + 15 * s)
     }
 
     /** "Controlled by CineRemote" indicator under LENS: a phone with signal arcs. */
@@ -308,7 +372,7 @@ class CameraHud(context: Context) : View(context) {
     private var leftHandle = RectF(); private var rightHandle = RectF()
 
     private fun drawEdgeHandles(c: Canvas) {
-        val my = pv.centerY()
+        val my = frame.centerY()
         fun handle(cx: Float): RectF {
             val r = RectF(cx - 15 * s, my - 40 * s, cx + 15 * s, my + 40 * s)
             fillC(Color.argb(110, 0, 0, 0)); c.drawRoundRect(r, 15 * s, 15 * s, fill)
@@ -326,44 +390,69 @@ class CameraHud(context: Context) : View(context) {
         return r
     }
 
-    private fun panelTitle(c: Canvas, title: String, rx0: Float, rx1: Float) {
+    private fun panelTitle(c: Canvas, title: String, rx0: Float, rx1: Float, ry: Float = 870f) {
         textC(Color.WHITE, 19 * s, lato)
-        c.drawText(title, x(rx0 + 17f), y(893f), text)
+        c.drawText(title, x(rx0 + 17f), y(ry + 23f), text)
         strokeC(Color.argb(70, 255, 255, 255), 1.5f * s)
-        c.drawLine(x(rx0 + 17f), y(903f), x(rx1 - 16f), y(903f), stroke)
+        c.drawLine(x(rx0 + 17f), y(ry + 33f), x(rx1 - 16f), y(ry + 33f), stroke)
     }
 
+    private var histRect = RectF(); private var mediaRect = RectF(); private var audioRect = RectF()
+
     private fun drawHistogramPanel(c: Canvas) {
-        panel(c, 27f, 393f)
+        histRect = panel(c, 27f, 393f)
         panelTitle(c, "Rec.709", 27f, 393f)
         val l = x(44f); val r = x(350f); val t = y(914f); val b = y(1000f)
         histogram()?.let { h ->
             val colors = intArrayOf(Color.argb(175, 235, 40, 40), Color.argb(175, 40, 215, 60), Color.argb(175, 50, 80, 255))
-            for (ch in 0..2) {
-                val bins = h[ch]
-                path.reset(); path.moveTo(l, b)
-                for (i in bins.indices) path.lineTo(l + (r - l) * i / (bins.size - 1), b - bins[i] * (b - t) * 0.95f)
-                path.lineTo(r, b); path.close()
-                fillC(colors[ch]); c.drawPath(path, fill)
-            }
+            for (ch in 0..2) drawHistCurve(c, h[ch], l, r, t, b, colors[ch])
         }
         strokeC(Color.argb(200, 255, 255, 255), 2 * s)
         c.drawLine(l, t, l, b, stroke); c.drawLine(l, b, r, b, stroke)
-        // clipping indicator column
         strokeC(Color.argb(190, 255, 255, 255), 1.5f * s)
         val cl = RectF(x(364f), y(920f), x(376f), y(1000f))
         c.drawRect(cl, stroke)
         for (i in 1..2) c.drawLine(cl.left, cl.top + cl.height() * i / 3, cl.right, cl.top + cl.height() * i / 3, stroke)
     }
 
+    private fun drawHistCurve(c: Canvas, bins: FloatArray, l: Float, r: Float, t: Float, b: Float, color: Int) {
+        path.reset(); path.moveTo(l, b)
+        for (i in bins.indices) path.lineTo(l + (r - l) * i / (bins.size - 1), b - bins[i] * (b - t) * 0.95f)
+        path.lineTo(r, b); path.close()
+        fillC(color); c.drawPath(path, fill)
+    }
+
+    /** Tap the histogram: an RGB parade (one channel per row) with legal-range marks. */
+    private fun drawParade(c: Canvas) {
+        histRect = panel(c, 27f, 1828f, 640f, 1017f, alpha = 200)
+        panelTitle(c, "Rec.709 RGB parade", 27f, 1828f, 640f)
+        val l = x(60f); val r = x(1795f)
+        val rows = floatArrayOf(690f, 795f, 900f)
+        val colors = intArrayOf(Color.argb(220, 235, 40, 40), Color.argb(220, 40, 215, 60), Color.argb(220, 60, 90, 255))
+        val h = histogram()
+        for (i in 0..2) {
+            val t = y(rows[i]); val b = y(rows[i] + 95f)
+            h?.let { drawHistCurve(c, it[i], l, r, t, b, colors[i]) }
+            strokeC(Color.argb(colors[i].ushr(24), Color.red(colors[i]), Color.green(colors[i]), Color.blue(colors[i])), 1.5f * s)
+            c.drawLine(l, b, r, b, stroke)
+        }
+        // 10-bit legal range marks: 64 and 940 of 1024
+        strokeC(Color.argb(170, 240, 170, 60), 1.5f * s)
+        textC(Color.argb(200, 240, 170, 60), 17 * s, lato)
+        for ((v, lbl) in listOf(0 to "0", 64 to "64", 940 to "940", 1024 to "1024")) {
+            val mx = l + (r - l) * v / 1024f
+            c.drawLine(mx, y(690f), mx, y(995f), stroke)
+            centered(c, lbl, mx, y(1012f))
+        }
+    }
+
     private var storage = Triple(0L, 0L, 0L)
     private var storageAt = 0L
 
     private fun drawMediaPanel(c: Canvas) {
-        panel(c, 743f, 1110f)
-        if (now() - storageAt > 2000) { storage = runCatching { recorder.storage() }.getOrDefault(storage); storageAt = now() }
+        mediaRect = panel(c, 743f, 1110f)
+        if (now() - storageAt > 2000) { storage = runCatching { recorder.storage(plannedBitrate()) }.getOrDefault(storage); storageAt = now() }
         val (total, free, runtime) = storage
-        // phone (internal storage) icon
         strokeC(Color.WHITE, 4.5f * s)
         c.drawRoundRect(RectF(x(776f), y(908f), x(822f), y(982f)), 9 * s, 9 * s, stroke)
         fillC(Color.WHITE)
@@ -381,25 +470,30 @@ class CameraHud(context: Context) : View(context) {
     }
 
     private fun drawAudioPanel(c: Canvas) {
-        panel(c, 1462f, 1828f)
+        audioRect = panel(c, 1462f, 1828f)
         panelTitle(c, "Internal", 1462f, 1828f)
-        val bl = x(1497f); val br = x(1805f); val bw = br - bl
-        val m = meter
+        drawMeters(c, x(1497f), x(1805f), 918f, 23f, 30f, 19f, 998f, x(1478f))
+    }
+
+    /** Two channel bars with zones, level, peak hold and the dB scale under them. */
+    private fun drawMeters(c: Canvas, bl: Float, br: Float, top0: Float, barH: Float, pitch: Float, scaleSize: Float, scaleY: Float, numX: Float) {
+        val bw = br - bl
+        val a = audio
+        val dim = intArrayOf(Color.rgb(26, 64, 25), Color.rgb(75, 75, 41), Color.rgb(75, 25, 32))
+        val lit = intArrayOf(Color.rgb(64, 205, 64), Color.rgb(224, 214, 54), Color.rgb(235, 52, 52))
+        val zones = floatArrayOf(0f, dbFrac(-10f), dbFrac(0f), 1f)
         for (ch in 0..1) {
-            val top = y(918f + ch * 30f); val bot = top + 23 * s
-            textC(Color.WHITE, 20 * s, latoBold)
-            c.drawText("${ch + 1}", x(1478f), bot - 4 * s, text)
-            val lvl = dbFrac(m?.level?.get(ch) ?: AudioMeter.SILENCE)
-            val zones = floatArrayOf(0f, dbFrac(-10f), dbFrac(0f), 1f)
-            val dim = intArrayOf(Color.rgb(26, 64, 25), Color.rgb(75, 75, 41), Color.rgb(75, 25, 32))
-            val lit = intArrayOf(Color.rgb(64, 205, 64), Color.rgb(224, 214, 54), Color.rgb(235, 52, 52))
+            val top = y(top0 + ch * pitch); val bot = top + barH * s
+            textC(Color.WHITE, scaleSize * 1.05f * s, latoBold)
+            c.drawText("${ch + 1}", numX, bot - (barH * 0.18f) * s, text)
+            val lvl = dbFrac(a?.level?.get(ch) ?: AudioInput.SILENCE)
             for (z in 0..2) {
                 val z0 = bl + bw * zones[z]; val z1 = bl + bw * zones[z + 1]
                 fillC(dim[z]); c.drawRect(z0, top, z1, bot, fill)
                 val litTo = bl + bw * lvl
                 if (litTo > z0) { fillC(lit[z]); c.drawRect(z0, top, minOf(z1, litTo), bot, fill) }
             }
-            m?.peak?.get(ch)?.let { pk ->
+            a?.peak?.get(ch)?.let { pk ->
                 val f = dbFrac(pk)
                 if (f > 0.01f) {
                     fillC(if (pk >= 0f) lit[2] else if (pk >= -10f) lit[1] else lit[0])
@@ -414,10 +508,31 @@ class CameraHud(context: Context) : View(context) {
                 c.drawRect(mx - 1 * s, bot - 5 * s, mx + 1 * s, bot, fill)
             }
         }
+        textC(Color.WHITE, scaleSize * s, latoBold)
+        for ((db, _) in METER_SCALE) centered(c, "${db.toInt()}", bl + bw * dbFrac(db), y(scaleY))
+    }
+
+    /** Tap the audio meter: big meters plus the Audio Gain slider. */
+    private fun drawAudioExpanded(c: Canvas) {
+        audioRect = panel(c, 420f, 1435f, 640f, 1017f, alpha = 200)
+        textC(Color.WHITE, 24 * s, latoBold)
+        centered(c, "Internal", x(927f), y(678f))
+        strokeC(Color.argb(70, 255, 255, 255), 1.5f * s)
+        c.drawLine(x(440f), y(695f), x(1415f), y(695f), stroke)
+        drawMeters(c, x(500f), x(1395f), 730f, 34f, 44f, 22f, 838f, x(462f))
+        c.drawLine(x(440f), y(865f), x(1415f), y(865f), strokeC(Color.argb(70, 255, 255, 255), 1.5f * s))
         textC(Color.WHITE, 19 * s, latoBold)
-        for ((db, _) in METER_SCALE) {
-            val t = "${db.toInt()}"
-            c.drawText(t, bl + bw * dbFrac(db) - text.measureText(t) / 2, y(998f), text)
+        c.drawText("AUDIO GAIN", x(470f), y(905f), text)
+        val gain = prefs.audioGain
+        val track = RectF(x(470f), y(950f), x(1270f), y(956f))
+        fillC(Color.rgb(90, 98, 110)); c.drawRoundRect(track, 3 * s, 3 * s, fill)
+        val kx = track.left + track.width() * gain / 100f
+        fillC(accent); c.drawRoundRect(RectF(track.left, track.top, kx, track.bottom), 3 * s, 3 * s, fill)
+        fillC(Color.WHITE); c.drawCircle(kx, track.centerY(), 17 * s, fill)
+        textC(Color.WHITE, 28 * s, lato)
+        c.drawText("$gain%", x(1305f), y(963f), text)
+        sliders += Slider(RectF(track.left - 25 * s, track.top - 40 * s, track.right + 25 * s, track.bottom + 40 * s), track) { pct ->
+            onGainChanged(pct); invalidate()
         }
     }
 
@@ -431,45 +546,236 @@ class CameraHud(context: Context) : View(context) {
         return 1f
     }
 
-    // ---- value ruler (replaces the bottom panels while a parameter is being edited)
-    private var rulerRect = RectF(); private var autoRect = RectF()
-    private var rulerCx = 0f
-    private val rulerSpacing get() = 130 * s
+    // ---- editor panel (replaces the bottom panels while a parameter is edited)
+    private class Btn(val rect: RectF, val act: () -> Unit)
+    private class RulerHit(val rect: RectF, val items: List<Item>, val cur: Int, val cx: Float, val spacing: Float)
+    private class Slider(val hit: RectF, val track: RectF, val set: (Int) -> Unit)
+    private val buttons = ArrayList<Btn>()
+    private val rulers = ArrayList<RulerHit>()
+    private val sliders = ArrayList<Slider>()
 
-    private fun drawRuler(c: Canvas, p: P) {
-        val items = choices(p)
-        rulerRect = panel(c, 27f, 1828f, 890f, 1017f, alpha = 160)
+    private fun drawEditor(c: Canvas, p: P) {
+        val twoRow = p == P.WB || p == P.LENS || p == P.ISO
+        val top = if (twoRow && p != P.ISO) 790f else 890f
+        val panelR = panel(c, 27f, 1828f, top, 1017f, alpha = 170)
         var left = x(44f)
-        autoRect = RectF()
+        var right = x(1811f)
+        // AUTO chip on the left
         if (p.autoCapable) {
             val r = RectF(left, y(925f), left + 120 * s, y(982f))
-            if (isAuto(p)) { fillC(accent); c.drawRoundRect(r, r.height() / 2, r.height() / 2, fill) }
-            else { strokeC(Color.argb(170, 255, 255, 255), 2.5f * s); c.drawRoundRect(r, r.height() / 2, r.height() / 2, stroke) }
-            textC(Color.WHITE, 22 * s, latoBlack)
-            c.drawText("AUTO", r.centerX() - text.measureText("AUTO") / 2, r.centerY() + 8 * s, text)
-            autoRect = r
-            left = r.right + 30 * s
+            chip(c, r, "AUTO", isAuto(p))
+            buttons += Btn(r) { toggleAuto(p) }
+            left = r.right + 26 * s
         }
-        rulerCx = (left + x(1811f)) / 2
+        // lock on the right (auto exposure / auto white balance hold)
+        if (p == P.SHUTTER || p == P.WB || p == P.TINT) {
+            val locked = if (p == P.SHUTTER) engine.aeLock else engine.awbLock
+            val r = RectF(right - 70 * s, y(918f), right, y(988f))
+            fillC(if (locked) accent else Color.argb(60, 255, 255, 255)); c.drawRoundRect(r, 12 * s, 12 * s, fill)
+            drawPadlock(c, r.centerX(), r.centerY(), s, locked)
+            buttons += Btn(r) {
+                if (p == P.SHUTTER) { engine.aeLock = !engine.aeLock; if (engine.aeLock) { engine.isoAuto = true; engine.shutterAuto = true } }
+                else { engine.awbLock = !engine.awbLock; if (engine.awbLock) engine.wbAuto = true }
+                changed()
+            }
+            right = r.left - 26 * s
+        }
+        when (p) {
+            P.ISO -> {
+                // preset buttons at full stops, like the Blackmagic app
+                val stops = listOf(50, 100, 200, 400, 800, 1600, 3200, 6400, 12800).filter { it in engine.isoRange.lower..engine.isoRange.upper }
+                val cur = value(p).toIntOrNull()
+                presetRow(c, stops.map { v -> Item("$v", !engine.isoAuto && cur == v) { engine.isoAuto = false; engine.iso = v } }, left, right, 925f, 982f)
+            }
+            P.WB -> {
+                val k = if (engine.wbAuto) -1 else engine.kelvin
+                iconRow(c, WB_PRESETS.map { (name, kelvin) -> Triple(name, k == kelvin) { engine.wbAuto = false; engine.awbLock = false; engine.kelvin = kelvin } },
+                    x(44f) + 146 * s, x(1811f) - 96 * s, 805f, 870f)
+                ruler(p)?.let { (items, cur) -> drawRulerRow(c, items, cur, left, right, p.label) }
+            }
+            P.LENS -> {
+                lensRow(c, x(44f), x(1811f), 805f, 870f)
+                ruler(p)?.let { (items, cur) -> drawRulerRow(c, items, cur, left, right, "ZOOM") }
+            }
+            else -> ruler(p)?.let { (items, cur) -> drawRulerRow(c, items, cur, left, right, p.label) }
+        }
+        editorRect = panelR
+    }
+    private var editorRect = RectF()
+
+    private fun chip(c: Canvas, r: RectF, label: String, on: Boolean) {
+        if (on) { fillC(accent); c.drawRoundRect(r, r.height() / 2, r.height() / 2, fill) }
+        else { strokeC(Color.argb(170, 255, 255, 255), 2.5f * s); c.drawRoundRect(r, r.height() / 2, r.height() / 2, stroke) }
+        textC(Color.WHITE, 22 * s, latoBlack)
+        centered(c, label, r.centerX(), r.centerY() + 8 * s)
+    }
+
+    private fun drawRulerRow(c: Canvas, items: List<Item>, cur: Int, left: Float, right: Float, title: String) {
+        val spacing = 130 * s
+        val cx = (left + right) / 2
         textC(accent, 17 * s, latoBold)
-        c.drawText(p.label, rulerCx - text.measureText(p.label) / 2, y(915f), text)
-        if (items.isEmpty()) return
-        val cur = curIndex(p, items)
-        c.save(); c.clipRect(left, rulerRect.top, x(1811f), rulerRect.bottom)
+        centered(c, title, cx, y(915f))
+        c.save(); c.clipRect(left, y(890f), right, y(1017f))
         for (i in items.indices) {
-            val ix = rulerCx + (i - cur) * rulerSpacing
-            if (ix < left - rulerSpacing || ix > x(1811f) + rulerSpacing) continue
+            val ix = cx + (i - cur) * spacing
+            if (ix < left - spacing || ix > right + spacing) continue
             val on = i == cur
             if (on) textC(Color.WHITE, 36 * s, latoBlack) else textC(Color.argb(150, 255, 255, 255), 25 * s, latoBold)
-            val label = items[i].first
-            c.drawText(label, ix - text.measureText(label) / 2, y(970f), text)
+            centered(c, items[i].label, ix, y(970f))
             strokeC(Color.argb(if (on) 255 else 110, 255, 255, 255), 2 * s)
             c.drawLine(ix, y(990f), ix, y(1000f), stroke)
         }
         c.restore()
         fillC(accent)
-        path.reset(); path.moveTo(rulerCx - 9 * s, y(1010f)); path.lineTo(rulerCx + 9 * s, y(1010f)); path.lineTo(rulerCx, y(999f)); path.close()
+        path.reset(); path.moveTo(cx - 9 * s, y(1010f)); path.lineTo(cx + 9 * s, y(1010f)); path.lineTo(cx, y(999f)); path.close()
         c.drawPath(path, fill)
+        rulers += RulerHit(RectF(left, y(890f), right, y(1017f)), items, cur, cx, spacing)
+    }
+
+    private fun presetRow(c: Canvas, items: List<Item>, left: Float, right: Float, ry0: Float, ry1: Float) {
+        if (items.isEmpty()) return
+        val w = (right - left) / items.size
+        for ((i, it) in items.withIndex()) {
+            val r = RectF(left + i * w + 6 * s, y(ry0), left + (i + 1) * w - 6 * s, y(ry1))
+            if (it.on) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
+            textC(Color.WHITE, 28 * s, if (it.on) latoBlack else latoBold)
+            centered(c, it.label, r.centerX(), r.centerY() + 10 * s)
+            buttons += Btn(r) { it.act(); changed() }
+        }
+    }
+
+    private fun iconRow(c: Canvas, items: List<Triple<String, Boolean, () -> Unit>>, left: Float, right: Float, ry0: Float, ry1: Float) {
+        val w = (right - left) / items.size
+        for ((i, it) in items.withIndex()) {
+            val (name, on, act) = it
+            val r = RectF(left + i * w + 10 * s, y(ry0), left + (i + 1) * w - 10 * s, y(ry1))
+            if (on) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
+            drawWbIcon(c, name, r.centerX(), r.centerY(), s)
+            buttons += Btn(r) { act(); changed() }
+        }
+    }
+
+    private fun lensRow(c: Canvas, left: Float, right: Float, ry0: Float, ry1: Float) {
+        val lenses = engine.lenses.filter { it.facing == CameraCharacteristics.LENS_FACING_BACK }.sortedBy { it.equivMm } +
+            engine.lenses.filter { it.facing == CameraCharacteristics.LENS_FACING_FRONT }.take(1)
+        val w = minOf(180 * s, (right - left) / lenses.size)
+        val start = (left + right) / 2 - w * lenses.size / 2
+        for ((i, l) in lenses.withIndex()) {
+            val r = RectF(start + i * w + 8 * s, y(ry0), start + (i + 1) * w - 8 * s, y(ry1))
+            val on = l.id == engine.lens.id
+            if (on) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
+            val front = l.facing == CameraCharacteristics.LENS_FACING_FRONT
+            textC(Color.WHITE, 24 * s, latoBlack)
+            centered(c, if (front) "Front" else fmtX(l.zoomVsMain), r.centerX(), r.centerY() - 2 * s)
+            textC(Color.argb(200, 255, 255, 255), 17 * s, latoBold)
+            centered(c, "${l.equivMm}mm", r.centerX(), r.centerY() + 22 * s)
+            buttons += Btn(r) { engine.switchLens(l.id); onParamChanged(null); invalidate() }
+        }
+    }
+
+    private fun drawPadlock(c: Canvas, cx: Float, cy: Float, k: Float, locked: Boolean) {
+        strokeC(Color.WHITE, 3.5f * k)
+        val body = RectF(cx - 14 * k, cy - 3 * k, cx + 14 * k, cy + 19 * k)
+        fillC(Color.WHITE); c.drawRoundRect(body, 4 * k, 4 * k, fill)
+        val shackle = RectF(cx - 9 * k, cy - 19 * k, cx + 9 * k, cy + 1 * k)
+        if (locked) c.drawArc(shackle, 180f, 180f, false, stroke)
+        else c.drawArc(RectF(shackle.left + 9 * k, shackle.top - 3 * k, shackle.right + 9 * k, shackle.bottom - 3 * k), 180f, 160f, false, stroke)
+        c.drawLine(shackle.left + (if (locked) 0f else 9 * k), cy - 9 * k + (if (locked) 0f else -3 * k), shackle.left + (if (locked) 0f else 9 * k), cy - 3 * k, stroke)
+        if (locked) c.drawLine(shackle.right, cy - 9 * k, shackle.right, cy - 3 * k, stroke)
+    }
+
+    private fun drawWbIcon(c: Canvas, name: String, cx: Float, cy: Float, k: Float) {
+        strokeC(Color.WHITE, 3 * k)
+        when (name) {
+            "Cloudy" -> {
+                path.reset()
+                path.addCircle(cx - 9 * k, cy + 2 * k, 10 * k, Path.Direction.CW)
+                path.addCircle(cx + 5 * k, cy - 4 * k, 13 * k, Path.Direction.CW)
+                path.addCircle(cx + 16 * k, cy + 4 * k, 8 * k, Path.Direction.CW)
+                c.save(); c.clipRect(cx - 30 * k, cy - 30 * k, cx + 30 * k, cy + 12 * k)
+                c.drawPath(path, stroke); c.restore()
+                c.drawLine(cx - 19 * k, cy + 12 * k, cx + 24 * k, cy + 12 * k, stroke)
+            }
+            "Shade" -> {
+                path.reset()
+                path.moveTo(cx - 16 * k, cy + 16 * k); path.lineTo(cx - 16 * k, cy - 2 * k); path.lineTo(cx, cy - 16 * k)
+                path.lineTo(cx + 16 * k, cy - 2 * k); path.lineTo(cx + 16 * k, cy + 16 * k); path.close()
+                c.drawPath(path, stroke)
+                for (i in 0..2) c.drawLine(cx + 20 * k + i * 5 * k, cy + 16 * k, cx + 28 * k + i * 5 * k, cy + 4 * k, stroke)
+            }
+            "Fluorescent" -> {
+                c.drawRoundRect(RectF(cx - 22 * k, cy - 5 * k, cx + 22 * k, cy + 5 * k), 5 * k, 5 * k, stroke)
+                for (i in -1..1) c.drawLine(cx + i * 12 * k, cy - 11 * k, cx + i * 12 * k, cy - 17 * k, stroke)
+                for (i in -1..1) c.drawLine(cx + i * 12 * k, cy + 11 * k, cx + i * 12 * k, cy + 17 * k, stroke)
+            }
+            "Tungsten" -> {
+                c.drawCircle(cx, cy - 4 * k, 11 * k, stroke)
+                c.drawLine(cx - 5 * k, cy + 11 * k, cx + 5 * k, cy + 11 * k, stroke)
+                c.drawLine(cx - 4 * k, cy + 16 * k, cx + 4 * k, cy + 16 * k, stroke)
+                for (i in 0 until 5) { val a = Math.PI * (1.1 + i * 0.2); c.drawLine(cx + (16 * k * cos(a)).toFloat(), cy - 4 * k + (16 * k * sin(a)).toFloat(), cx + (21 * k * cos(a)).toFloat(), cy - 4 * k + (21 * k * sin(a)).toFloat(), stroke) }
+            }
+            else -> {   // Daylight
+                c.drawCircle(cx, cy, 9 * k, stroke)
+                for (i in 0 until 8) { val a = Math.PI * 2 * i / 8; c.drawLine(cx + (14 * k * cos(a)).toFloat(), cy + (14 * k * sin(a)).toFloat(), cx + (19 * k * cos(a)).toFloat(), cy + (19 * k * sin(a)).toFloat(), stroke) }
+            }
+        }
+    }
+
+    // ---- guides toolbar (tool column guides button): torch, safe area, frame guides, grid
+    private fun drawGuidesBar(c: Canvas) {
+        editorRect = panel(c, 27f, 1828f, 790f, 1017f, alpha = 170)
+        val tools = listOfNotNull(if (engine.hasTorch) GuideTool.TORCH else null, GuideTool.SAFE, GuideTool.FRAME, GuideTool.GRID)
+        val w = 110 * s
+        val start = x(927f) - w * tools.size / 2
+        for ((i, t) in tools.withIndex()) {
+            val r = RectF(start + i * w + 10 * s, y(800f), start + (i + 1) * w - 10 * s, y(870f))
+            val active = when (t) { GuideTool.TORCH -> engine.torch; GuideTool.SAFE -> safeArea > 0; GuideTool.FRAME -> frameGuide != null; GuideTool.GRID -> grid != Grid.OFF }
+            if (t == guideTool && t != GuideTool.TORCH) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
+            drawGuideIcon(c, t, r.centerX(), r.centerY(), if (active && t != guideTool) accent else Color.WHITE)
+            buttons += Btn(r) {
+                if (t == GuideTool.TORCH) { engine.torch = !engine.torch; changed() } else { guideTool = t; invalidate() }
+            }
+        }
+        val left = x(44f); val right = x(1811f) - 120 * s
+        val offR = RectF(right + 20 * s, y(925f), x(1811f), y(982f))
+        when (guideTool) {
+            GuideTool.SAFE -> {
+                val opts = (70..100 step 5).toList()
+                val cur = opts.indexOf(safeArea).let { if (it < 0) 3 else it }
+                drawRulerRow(c, opts.map { v -> Item("$v%", false) { safeArea = v } }, cur, left, right, "SAFE AREA")
+                chip(c, offR, "OFF", safeArea == 0); buttons += Btn(offR) { safeArea = 0; invalidate() }
+            }
+            GuideTool.FRAME -> {
+                val opts = GUIDE_RATIOS.keys.toList()
+                val cur = opts.indexOf(frameGuide).let { if (it < 0) opts.indexOf("2.39:1") else it }
+                drawRulerRow(c, opts.map { g -> Item(g, false) { frameGuide = g } }, cur, left, right, "FRAME GUIDES")
+                chip(c, offR, "OFF", frameGuide == null); buttons += Btn(offR) { frameGuide = null; invalidate() }
+            }
+            else -> {
+                val opts = Grid.values().filter { it != Grid.OFF }
+                presetRow(c, opts.map { g -> Item(g.label, grid == g) { grid = g } }, left, right, 925f, 982f)
+                chip(c, offR, "OFF", grid == Grid.OFF); buttons += Btn(offR) { grid = Grid.OFF; invalidate() }
+            }
+        }
+    }
+
+    private fun drawGuideIcon(c: Canvas, t: GuideTool, cx: Float, cy: Float, color: Int) {
+        when (t) {
+            GuideTool.TORCH -> drawBolt(c, cx, cy, color, 0.8f * u)
+            GuideTool.SAFE -> {
+                strokeC(color, 3 * s); c.drawRect(cx - 24 * s, cy - 16 * s, cx + 24 * s, cy + 16 * s, stroke)
+                strokeC(color, 2 * s); c.drawRect(cx - 15 * s, cy - 9 * s, cx + 15 * s, cy + 9 * s, stroke)
+            }
+            GuideTool.FRAME -> {
+                strokeC(color, 3 * s); c.drawRect(cx - 24 * s, cy - 16 * s, cx + 24 * s, cy + 16 * s, stroke)
+                c.drawLine(cx - 24 * s, cy - 7 * s, cx + 24 * s, cy - 7 * s, stroke); c.drawLine(cx - 24 * s, cy + 7 * s, cx + 24 * s, cy + 7 * s, stroke)
+            }
+            GuideTool.GRID -> {
+                strokeC(color, 3 * s); c.drawRect(cx - 24 * s, cy - 16 * s, cx + 24 * s, cy + 16 * s, stroke)
+                strokeC(color, 2 * s)
+                for (i in -1..1 step 2) { c.drawLine(cx + i * 8 * s, cy - 16 * s, cx + i * 8 * s, cy + 16 * s, stroke); c.drawLine(cx - 24 * s, cy + i * 5.3f * s, cx + 24 * s, cy + i * 5.3f * s, stroke) }
+            }
+        }
     }
 
     private fun drawReticle(c: Canvas) {
@@ -481,7 +787,7 @@ class CameraHud(context: Context) : View(context) {
     }
 
     // ---- tool column
-    private enum class Tool { GUIDES, AF, EXPOSURE, TORCH, RECORD, LENS, STAB, FLIP }
+    private enum class Tool { GUIDES, AF, EXPOSURE, RECORD, LENS, STAB, FLIP }
     private val toolHit = HashMap<Tool, RectF>()
 
     private fun toolRect(t: Tool, cx: Float, cy: Float, r: Float) { toolHit[t] = RectF(cx - r, cy - r, cx + r, cy + r) }
@@ -489,39 +795,27 @@ class CameraHud(context: Context) : View(context) {
     private fun drawToolColumn(c: Canvas) {
         toolHit.clear()
         val cx = tx
-        // frame guides: corner brackets
         drawBrackets(c, cx, 64 * u, 67 * u, 54 * u, if (guidesOn) accent else Color.WHITE)
         toolRect(Tool.GUIDES, cx, 64 * u, 50 * u)
-        // autofocus: rounded frame open at the sides, dot in the middle
-        drawAfIcon(c, cx, 185 * u, if (engine.afAuto) accent else Color.WHITE)
+        drawAfIcon(c, cx, 185 * u, if (selected == P.FOCUS) accent else Color.WHITE)
         toolRect(Tool.AF, cx, 185 * u, 50 * u)
-        // exposure +/- with A when automatic
-        drawExposureIcon(c, cx - 4 * u, 307 * u)
+        drawExposureIcon(c, cx - 4 * u, 307 * u, selected == P.EV)
         if (autoExposure) { textC(Color.WHITE, 30 * u, latoBlack); c.drawText("A", cx + 38 * u, 319 * u, text) }
         toolRect(Tool.EXPOSURE, cx, 307 * u, 50 * u)
-        // torch, when this lens has one
-        if (engine.hasTorch) {
-            drawBolt(c, cx, 412 * u, if (engine.torch) accent else Color.WHITE)
-            toolRect(Tool.TORCH, cx, 412 * u, 45 * u)
-        }
-        // record
         val ry = 540 * u
         strokeC(Color.WHITE, 5 * u); c.drawCircle(cx, ry, 77.5f * u, stroke)
         fillC(if (recorder.isRecording) red else Color.rgb(102, 13, 12)); c.drawCircle(cx, ry, 37 * u, fill)
         toolRect(Tool.RECORD, cx, ry, 85 * u)
-        // lens / zoom
         val ly = 770 * u
-        strokeC(Color.WHITE, 4 * u); c.drawCircle(cx, ly, 28 * u, stroke)
+        strokeC(if (selected == P.LENS) accent else Color.WHITE, 4 * u); c.drawCircle(cx, ly, 28 * u, stroke)
         fillC(Color.rgb(58, 62, 68)); c.drawCircle(cx, ly, 21 * u, fill)
         fillC(Color.rgb(150, 155, 162)); c.drawCircle(cx + 6 * u, ly - 7 * u, 5 * u, fill)
         val zoomLabel = if (engine.isFront) "F" else fmtX(engine.lens.zoomVsMain * engine.zoom)
         textC(Color.WHITE, 30 * u, lato)
         c.drawText(zoomLabel, cx + 63 * u - text.measureText(zoomLabel), 824 * u, text)
         toolRect(Tool.LENS, cx, ly, 50 * u)
-        // stabilisation badge (in the Blackmagic LUT button's style)
         drawBadgeButton(c, cx - 2 * u, 888 * u, "STAB", engine.stabilization)
         toolRect(Tool.STAB, cx, 888 * u, 45 * u)
-        // front/back flip
         drawFlipIcon(c, cx, 1013 * u)
         toolRect(Tool.FLIP, cx, 1013 * u, 50 * u)
     }
@@ -551,28 +845,28 @@ class CameraHud(context: Context) : View(context) {
         c.drawCircle(cx, cy, 10 * u, stroke)
     }
 
-    private fun drawExposureIcon(c: Canvas, cx: Float, cy: Float) {
+    private fun drawExposureIcon(c: Canvas, cx: Float, cy: Float, active: Boolean) {
         val half = 27 * u
         val r = RectF(cx - half, cy - half, cx + half, cy + half)
-        fillC(Color.WHITE); c.drawRoundRect(r, 9 * u, 9 * u, fill)
-        // dark upper-left triangle
+        val fg = if (active) accent else Color.WHITE
+        fillC(fg); c.drawRoundRect(r, 9 * u, 9 * u, fill)
         c.save()
         path.reset(); path.moveTo(r.left, r.top); path.lineTo(r.right, r.top); path.lineTo(r.left, r.bottom); path.close()
         c.clipPath(path)
         fillC(navy); c.drawRoundRect(RectF(r.left + 3 * u, r.top + 3 * u, r.right, r.bottom), 7 * u, 7 * u, fill)
         c.restore()
-        strokeC(Color.WHITE, 4 * u)
+        strokeC(fg, 4 * u)
         c.drawLine(r.left + 10 * u, r.top + 18 * u, r.left + 26 * u, r.top + 18 * u, stroke)
         c.drawLine(r.left + 18 * u, r.top + 10 * u, r.left + 18 * u, r.top + 26 * u, stroke)
         strokeC(navy, 4 * u)
         c.drawLine(r.right - 26 * u, r.bottom - 16 * u, r.right - 10 * u, r.bottom - 16 * u, stroke)
     }
 
-    private fun drawBolt(c: Canvas, cx: Float, cy: Float, color: Int) {
-        strokeC(color, 4 * u)
+    private fun drawBolt(c: Canvas, cx: Float, cy: Float, color: Int, k: Float = u) {
+        strokeC(color, 4 * k)
         path.reset()
-        path.moveTo(cx + 6 * u, cy - 26 * u); path.lineTo(cx - 12 * u, cy + 3 * u); path.lineTo(cx + 2 * u, cy + 3 * u)
-        path.lineTo(cx - 6 * u, cy + 26 * u); path.lineTo(cx + 12 * u, cy - 3 * u); path.lineTo(cx - 2 * u, cy - 3 * u); path.close()
+        path.moveTo(cx + 6 * k, cy - 26 * k); path.lineTo(cx - 12 * k, cy + 3 * k); path.lineTo(cx + 2 * k, cy + 3 * k)
+        path.lineTo(cx - 6 * k, cy + 26 * k); path.lineTo(cx + 12 * k, cy - 3 * k); path.lineTo(cx - 2 * k, cy - 3 * k); path.close()
         c.drawPath(path, stroke)
     }
 
@@ -583,14 +877,13 @@ class CameraHud(context: Context) : View(context) {
         val col = if (on) accent else Color.WHITE
         strokeC(col, 3.5f * u); c.drawRoundRect(r, 8 * u, 8 * u, stroke)
         textC(col, 17 * u, latoBlack)
-        c.drawText(label, r.centerX() - text.measureText(label) / 2, r.centerY() + 6 * u, text)
+        centered(c, label, r.centerX(), r.centerY() + 6 * u)
     }
 
     private fun drawFlipIcon(c: Canvas, cx: Float, cy: Float) {
         strokeC(Color.WHITE, 4 * u)
         val w = 60 * u; val h = 40 * u
         val r = RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
-        // body with gaps on the left and right where the turn arrows sit
         path.reset()
         path.moveTo(r.left, cy - 6 * u); path.lineTo(r.left, r.top + 9 * u); path.quadTo(r.left, r.top, r.left + 9 * u, r.top)
         path.lineTo(r.right - 9 * u, r.top); path.quadTo(r.right, r.top, r.right, r.top + 9 * u)
@@ -598,7 +891,6 @@ class CameraHud(context: Context) : View(context) {
         path.lineTo(r.left + 9 * u, r.bottom); path.quadTo(r.left, r.bottom, r.left, r.bottom - 9 * u)
         c.drawPath(path, stroke)
         c.drawCircle(cx, cy, 10 * u, stroke)
-        // turn arrows: down at the right gap, up at the left gap
         path.reset()
         path.moveTo(r.right - 7 * u, cy - 2 * u); path.lineTo(r.right, cy + 6 * u); path.lineTo(r.right + 7 * u, cy - 2 * u)
         path.moveTo(r.left - 7 * u, cy + 2 * u); path.lineTo(r.left, cy - 6 * u); path.lineTo(r.left + 7 * u, cy + 2 * u)
@@ -614,47 +906,50 @@ class CameraHud(context: Context) : View(context) {
     private fun drawNavRail(c: Canvas) {
         navHit.clear()
         val cx = nx
+        val activeNav = if (settingsOpen) Nav.SETTINGS else Nav.CAMERA
         fillC(Color.rgb(0, 18, 38))
-        c.drawRoundRect(RectF(navX + 18 * u, 90 * u, navX + 138 * u, 239 * u), 12 * u, 12 * u, fill)
+        c.drawRoundRect(RectF(navX + 18 * u, (activeNav.iconY - 63) * u, navX + 138 * u, (activeNav.labelY + 14) * u), 12 * u, 12 * u, fill)
         for (n in Nav.values()) {
             val iy = n.iconY * u
-            val active = n == Nav.CAMERA
+            val active = n == activeNav
             when (n) {
-                Nav.CAMERA -> drawCamcorder(c, cx, iy)
+                Nav.CAMERA -> drawCamcorder(c, cx, iy, active)
                 Nav.MEDIA -> drawFilmFrame(c, cx, iy)
                 Nav.REMOTE -> {
                     drawPhoneWaves(c, cx, iy + 8 * u, u, Color.WHITE)
                     fillC(if (connected) Color.rgb(64, 205, 64) else Color.argb(90, 255, 255, 255))
                     c.drawCircle(cx + 24 * u, iy + 22 * u, 7 * u, fill)
                 }
-                Nav.SETTINGS -> drawGear(c, cx, iy)
+                Nav.SETTINGS -> drawGear(c, cx, iy, if (active) accent else Color.WHITE)
             }
             textC(if (active) navActive else navIdle, 25 * u, latoBold)
-            c.drawText(n.label, cx - text.measureText(n.label) / 2, n.labelY * u, text)
+            centered(c, n.label, cx, n.labelY * u)
             navHit[n] = RectF(navX, iy - 70 * u, width.toFloat(), n.labelY * u + 25 * u)
         }
-        // battery, bottom of the rail
-        val by = 1040 * u
-        strokeC(navIdle, 2.5f * u)
-        val body = RectF(cx - 38 * u, by - 12 * u, cx - 6 * u, by + 4 * u)
-        c.drawRoundRect(body, 3 * u, 3 * u, stroke)
-        fillC(navIdle)
-        c.drawRect(body.right + 1 * u, by - 7 * u, body.right + 4 * u, by - 1 * u, fill)
-        c.drawRect(body.left + 3 * u, body.top + 3 * u, body.left + 3 * u + (body.width() - 6 * u) * battery / 100f, body.bottom - 3 * u, fill)
-        textC(navIdle, 20 * u, latoBold)
-        c.drawText("$battery%", cx + 2 * u, by + 3 * u, text)
+        if (prefs.showBattery) {
+            val by = 1040 * u
+            strokeC(navIdle, 2.5f * u)
+            val body = RectF(cx - 38 * u, by - 12 * u, cx - 6 * u, by + 4 * u)
+            c.drawRoundRect(body, 3 * u, 3 * u, stroke)
+            fillC(navIdle)
+            c.drawRect(body.right + 1 * u, by - 7 * u, body.right + 4 * u, by - 1 * u, fill)
+            c.drawRect(body.left + 3 * u, body.top + 3 * u, body.left + 3 * u + (body.width() - 6 * u) * battery / 100f, body.bottom - 3 * u, fill)
+            textC(navIdle, 20 * u, latoBold)
+            c.drawText("$battery%", cx + 2 * u, by + 3 * u, text)
+        }
     }
 
-    private fun drawCamcorder(c: Canvas, cx: Float, cy: Float) {
+    private fun drawCamcorder(c: Canvas, cx: Float, cy: Float, active: Boolean) {
         val body = RectF(cx - 42 * u, cy - 22 * u, cx + 12 * u, cy + 22 * u)
-        fillC(Color.rgb(0, 71, 147)); c.drawRoundRect(body, 9 * u, 9 * u, fill)
-        strokeC(accent, 4 * u); c.drawRoundRect(body, 9 * u, 9 * u, stroke)
+        val line = if (active) accent else Color.WHITE
+        if (active) { fillC(Color.rgb(0, 71, 147)); c.drawRoundRect(body, 9 * u, 9 * u, fill) }
+        strokeC(line, 4 * u); c.drawRoundRect(body, 9 * u, 9 * u, stroke)
         path.reset()
         path.moveTo(cx + 14 * u, cy - 6 * u); path.lineTo(cx + 40 * u, cy - 19 * u); path.lineTo(cx + 40 * u, cy + 19 * u)
         path.lineTo(cx + 14 * u, cy + 6 * u); path.close()
-        fillC(Color.rgb(0, 71, 147)); c.drawPath(path, fill)
+        if (active) { fillC(Color.rgb(0, 71, 147)); c.drawPath(path, fill) }
         c.drawPath(path, stroke)
-        fillC(accent)
+        fillC(line)
         for (i in 0..2) c.drawRoundRect(RectF(cx - 34 * u + i * 13 * u, cy - 14 * u, cx - 26 * u + i * 13 * u, cy - 7 * u), 2 * u, 2 * u, fill)
     }
 
@@ -671,8 +966,8 @@ class CameraHud(context: Context) : View(context) {
         c.drawPath(path, fill)
     }
 
-    private fun drawGear(c: Canvas, cx: Float, cy: Float) {
-        strokeC(Color.WHITE, 4 * u)
+    private fun drawGear(c: Canvas, cx: Float, cy: Float, color: Int) {
+        strokeC(color, 4 * u)
         path.reset()
         val teeth = 8
         for (i in 0 until teeth * 4) {
@@ -687,68 +982,81 @@ class CameraHud(context: Context) : View(context) {
     }
 
     // ------------------------------------------------------------------ touch
-    private var dragging = false
+    private var drag: RulerHit? = null
+    private var dragSlider: Slider? = null
     private var downX = 0f
-    private var downIdx = 0
-    private var rulerDown = false
+    private var dragging = false
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (!::engine.isInitialized) return true
         val px = e.x; val py = e.y
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                rulerDown = false
+                drag = null; dragSlider = null; dragging = false; downX = px
                 toolHit.entries.firstOrNull { it.value.contains(px, py) }?.let { onTool(it.key); invalidate(); return true }
                 navHit.entries.firstOrNull { it.value.contains(px, py) }?.let { onNav(it.key); return true }
-                val sel = selected
-                if (sel != null && autoRect.contains(px, py)) { toggleAuto(sel); invalidate(); return true }
-                if (sel != null && rulerRect.contains(px, py)) {
-                    rulerDown = true; dragging = false; downX = px; downIdx = curIndex(sel, choices(sel)); return true
-                }
+                buttons.firstOrNull { it.rect.contains(px, py) }?.let { it.act(); invalidate(); return true }
+                sliders.firstOrNull { it.hit.contains(px, py) }?.let { dragSlider = it; slide(it, px); return true }
+                rulers.firstOrNull { it.rect.contains(px, py) }?.let { drag = it; return true }
                 readoutHit.entries.firstOrNull { it.value.contains(px, py) }?.let {
-                    selected = if (selected == it.key) null else it.key; invalidate(); return true }
-                if (leftHandle.contains(px, py) || rightHandle.contains(px, py)) { panelsOn = !panelsOn; invalidate(); return true }
+                    select(if (selected == it.key) null else it.key); return true }
+                if (badgeRect.contains(px, py)) { onSettings("resolution"); return true }
+                if (leftHandle.contains(px, py) || rightHandle.contains(px, py)) { panelsOn = !panelsOn; collapse(); return true }
+                if (selected == null && !guidesOn && expanded == null && panelsOn) {
+                    if (prefs.showHistogram && histRect.contains(px, py)) { expanded = Expanded.HISTOGRAM; invalidate(); return true }
+                    if (prefs.showAudioMeters && audioRect.contains(px, py)) { expanded = Expanded.AUDIO; invalidate(); return true }
+                    if (prefs.showStorage && mediaRect.contains(px, py)) { onSettings("record"); return true }
+                }
+                if (expanded != null && (histRect.contains(px, py) || audioRect.contains(px, py))) {
+                    if (expanded == Expanded.HISTOGRAM || !audioRect.contains(px, py) || py < y(865f)) { expanded = null; invalidate() }
+                    return true
+                }
+                if (editorRect.contains(px, py) && (selected != null || guidesOn)) return true
                 if (pv.contains(px, py)) {
-                    if (selected != null) { selected = null; invalidate(); return true }
+                    if (selected != null || guidesOn || expanded != null) { collapse(); return true }
                     val fx = ((px - pv.left) / pv.width()).coerceIn(0f, 1f); val fy = ((py - pv.top) / pv.height()).coerceIn(0f, 1f)
                     engine.tapFocus(fx, fy); showFocusReticle(fx, fy); onParamChanged(null)
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                val sel = selected ?: return true
-                if (!rulerDown) return true
+                dragSlider?.let { slide(it, px); return true }
+                val d = drag ?: return true
                 if (abs(px - downX) > 12 * s) dragging = true
                 if (!dragging) return true
-                val items = choices(sel)
-                if (items.isEmpty()) return true
-                val idx = (downIdx - ((px - downX) / rulerSpacing).roundToInt()).coerceIn(0, items.size - 1)
-                if (idx != curIndex(sel, items)) { items[idx].second(); engine.apply(); invalidate() }
+                val idx = (d.cur - ((px - downX) / d.spacing).roundToInt()).coerceIn(0, d.items.size - 1)
+                d.items[idx].act(); changed()
+                drag = RulerHit(d.rect, d.items, idx, d.cx, d.spacing); downX = px
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val sel = selected
-                if (sel != null && rulerDown && !dragging && e.actionMasked == MotionEvent.ACTION_UP) {
+                val d = drag
+                if (d != null && !dragging && e.actionMasked == MotionEvent.ACTION_UP) {
                     // tap an item on the ruler to jump to it
-                    val items = choices(sel)
-                    val idx = (downIdx + ((px - rulerCx) / rulerSpacing).roundToInt()).coerceIn(0, maxOf(0, items.size - 1))
-                    if (items.isNotEmpty()) { items[idx].second(); engine.apply() }
-                }
-                if (rulerDown) onParamChanged(null)
-                rulerDown = false; dragging = false
+                    val idx = (d.cur + ((px - d.cx) / d.spacing).roundToInt()).coerceIn(0, d.items.size - 1)
+                    d.items[idx].act(); changed()
+                } else if (d != null) onParamChanged(null)
+                drag = null; dragSlider = null; dragging = false
                 invalidate()
             }
         }
         return true
     }
 
+    private fun slide(sl: Slider, px: Float) {
+        val pct = (((px - sl.track.left) / sl.track.width()) * 100).roundToInt().coerceIn(0, 100)
+        sl.set(pct)
+    }
+
+    private fun select(p: P?) { selected = p; guidesOn = false; expanded = null; invalidate() }
+    private fun collapse() { selected = null; guidesOn = false; expanded = null; invalidate() }
+
     private fun onTool(t: Tool) {
         when (t) {
-            Tool.GUIDES -> guidesOn = !guidesOn
-            Tool.AF -> selected = if (selected == P.FOCUS) null else P.FOCUS
-            Tool.EXPOSURE -> selected = if (selected == P.EV) null else P.EV
-            Tool.TORCH -> { engine.torch = !engine.torch; engine.apply(); onParamChanged(null) }
+            Tool.GUIDES -> { val on = !guidesOn; collapse(); guidesOn = on }
+            Tool.AF -> select(if (selected == P.FOCUS) null else P.FOCUS)
+            Tool.EXPOSURE -> select(if (selected == P.EV) null else P.EV)
             Tool.RECORD -> onRecordToggle()
-            Tool.LENS -> selected = if (selected == P.ZOOM) null else P.ZOOM
-            Tool.STAB -> { engine.stabilization = !engine.stabilization; engine.apply(); onParamChanged(null) }
+            Tool.LENS -> select(if (selected == P.LENS) null else P.LENS)
+            Tool.STAB -> { engine.stabilization = !engine.stabilization; changed() }
             Tool.FLIP -> {
                 val target = if (engine.isFront) engine.lenses.firstOrNull { it.type == CameraEngine.LENS_MAIN }
                              else engine.lenses.firstOrNull { it.type == CameraEngine.LENS_FRONT }
@@ -759,18 +1067,22 @@ class CameraHud(context: Context) : View(context) {
 
     private fun onNav(n: Nav) {
         when (n) {
-            Nav.CAMERA -> { selected = null; invalidate() }
+            Nav.CAMERA -> { collapse(); if (settingsOpen) onSettings(CLOSE) }
             Nav.MEDIA -> onMedia()
             Nav.REMOTE -> onRemote()
-            Nav.SETTINGS -> onSettings()
+            Nav.SETTINGS -> onSettings(null)
         }
     }
 
     companion object {
+        const val CLOSE = "close"
         val SHUTTER_DENS = listOf(24, 25, 30, 48, 50, 60, 96, 100, 120, 125, 160, 180, 200, 240, 250, 320, 360,
             400, 480, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 8000)
         /** Audio meter scale marks (dBFS) and where they sit along the bar, from the reference layout. */
         val METER_SCALE = listOf(-45f to 0f, -30f to 0.140f, -20f to 0.321f, -10f to 0.594f, -6f to 0.711f,
             -3f to 0.802f, 0f to 0.912f, 3f to 1f)
+        val GUIDE_RATIOS = linkedMapOf("2.76:1" to 2.76f, "2.4:1" to 2.4f, "2.39:1" to 2.39f, "2.35:1" to 2.35f,
+            "2:1" to 2f, "1.85:1" to 1.85f, "16:9" to 16f / 9, "14:9" to 14f / 9, "4:3" to 4f / 3, "1:1" to 1f)
+        val WB_PRESETS = listOf("Cloudy" to 6500, "Shade" to 7500, "Fluorescent" to 4000, "Tungsten" to 3200, "Daylight" to 5600)
     }
 }

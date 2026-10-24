@@ -27,7 +27,7 @@ import java.nio.ByteBuffer
  * Camera frames arrive upright from the [FrameTap] via [onFrame]; [egl] is the tap's context, shared so the
  * hardware encoder can read its textures.
  */
-class RtcLink(context: Context, private val egl: EglBase) {
+class RtcLink(context: Context, private val egl: EglBase, private val gain: () -> Float = { 1f }) {
 
     interface SessionListener {
         fun onLocalOffer(sdp: String)
@@ -57,6 +57,8 @@ class RtcLink(context: Context, private val egl: EglBase) {
             // Raw camera mic, not the default VOICE_COMMUNICATION: no call processing, and a call-mode capture
             // takes priority over the recorder and level meter sharing the mic.
             .setAudioSource(android.media.MediaRecorder.AudioSource.CAMCORDER)
+            // the same Audio Gain as the recording, applied to the stream's PCM in place
+            .setAudioRecordDataCallback { _, _, _, buf -> applyGain(buf) }
             .setUseHardwareAcousticEchoCanceler(false)
             .setUseHardwareNoiseSuppressor(false)
             .createAudioDeviceModule()
@@ -76,6 +78,13 @@ class RtcLink(context: Context, private val egl: EglBase) {
         }
         audioTrack = factory.createAudioTrack("audio0", factory.createAudioSource(ac))
         videoSource.capturerObserver.onCapturerStarted(true)
+    }
+
+    private fun applyGain(buf: ByteBuffer) {
+        val g = gain()
+        if (g >= 0.999f) return
+        val sb = buf.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        for (i in 0 until sb.limit()) sb.put(i, (sb.get(i) * g).toInt().coerceIn(-32768, 32767).toShort())
     }
 
     /** An upright camera frame from the [FrameTap] (its GL thread); forwarded only while previewing. */

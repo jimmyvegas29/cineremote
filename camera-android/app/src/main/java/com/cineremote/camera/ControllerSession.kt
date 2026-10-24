@@ -18,14 +18,16 @@ class ControllerSession(
     private val link: RemoteServer.SignalingLink,
     private val engine: CameraEngine,
     private val recorder: Recorder,
+    takes: Takes,
     private val prefs: Prefs,
     private val tap: FrameTap,
+    audio: AudioInput,
     batteryPct: () -> Float,
     private val onClosed: (ControllerSession) -> Unit,
 ) {
-    private val rtc = RtcLink(context, tap.egl)
+    private val rtc = RtcLink(context, tap.egl) { audio.gain }
     private var closed = false
-    val controller = CameraController(engine, recorder, prefs, batteryPct) { m -> sendSubordinate(m) }
+    val controller = CameraController(engine, recorder, takes, prefs, batteryPct) { m -> sendSubordinate(m) }
 
     fun start() {
         controller.onStartPreview = {

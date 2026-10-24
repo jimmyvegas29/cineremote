@@ -12,13 +12,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
-import android.text.InputType
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONObject
 import org.webrtc.RendererCommon
@@ -27,17 +25,19 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * CineRemote Camera. A Blackmagic-style on-phone camera (preview + [CameraHud]) that CineRemote can also
- * find and control over the network. The phone is usable on its own; a connected controller shares control.
+ * CineRemote Camera. A Blackmagic-style on-phone camera (preview + [CameraHud] + [SettingsPanel]) that
+ * CineRemote can also find and control over the network. The phone is usable on its own; a connected
+ * controller shares control.
  */
 class MainActivity : Activity(), RemoteServer.Listener {
 
     private lateinit var prefs: Prefs
     private lateinit var engine: CameraEngine
     private lateinit var recorder: Recorder
-    private lateinit var server: RemoteServer
+    private lateinit var takes: Takes
+    private lateinit var audio: AudioInput
+    private var server: RemoteServer? = null
     private lateinit var tap: FrameTap
-    private val meter = AudioMeter()
     private var session: ControllerSession? = null
 
     private val ui = Handler(Looper.getMainLooper())
@@ -45,6 +45,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
     private lateinit var preview: SurfaceViewRenderer
     private lateinit var hud: CameraHud
     private lateinit var permNote: TextView
+    private var settings: SettingsPanel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +89,10 @@ class MainActivity : Activity(), RemoteServer.Listener {
             override fun onCameraChanged(fields: Set<String>) { ui.post { session?.emitChanged(fields); hud.invalidate() } }
             override fun onCameraError(message: String) { ui.post { toast(message) } }
         })
+        audio = AudioInput(prefs)
+        takes = Takes(engine, recorder, audio, prefs) {
+            ui.post { session?.emitChanged(setOf("recording_state", "active_storage")); hud.invalidate() }
+        }
         trackDisplayRotation()
         // The camera renders only into the frame tap, which feeds the on-screen preview, the stream and the
         // histogram. A separate preview output would make three camera streams while recording, and the
@@ -98,7 +103,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
         tap.previewSink = preview
         engine.setStreamSurface(tap.surface)
         applyCaptureSize(engine.captureSize.width, engine.captureSize.height)
-        meter.start()
+        audio.start()
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             // debug builds: `adb shell am broadcast -a com.cineremote.camera.SNAP` saves the stream's next frame
             registerReceiver(object : android.content.BroadcastReceiver() {
@@ -108,17 +113,18 @@ class MainActivity : Activity(), RemoteServer.Listener {
         engine.onCaptureSizeChanged = { size -> ui.post { applyCaptureSize(size.width, size.height) } }
         hud.engine = engine
         hud.recorder = recorder
-        hud.meter = meter
+        hud.prefs = prefs
+        hud.audio = audio
         hud.histogram = { tap.histogram }
-        hud.deviceName = prefs.deviceName
-        hud.onRecordToggle = { toggleRecordLocal() }
-        hud.onSettings = { settingsDialog() }
+        hud.plannedBitrate = { takes.config().bitrate }
+        hud.onRecordToggle = { toggleRecord() }
+        hud.onSettings = { page -> if (page == CameraHud.CLOSE) closeSettings() else openSettings(page) }
         hud.onMedia = { openMedia() }
         hud.onRemote = { remoteDialog() }
+        hud.onGainChanged = { p -> setGain(p) }
         hud.onParamChanged = { ui.post { session?.emitChanged(CameraEngine.ALL_FIELDS) } }
 
-        server = RemoteServer(this, prefs, this)
-        server.start()
+        if (prefs.remoteEnabled) startServer()
         ui.post(refreshRunnable)
         hud.connected = false
         hud.invalidate()
@@ -147,10 +153,21 @@ class MainActivity : Activity(), RemoteServer.Listener {
         }, ui)
     }
 
-    // ------------------------------------------------------------------ RemoteServer.Listener
+    // ------------------------------------------------------------------ remote control
+    private fun startServer() {
+        if (server != null) return
+        server = RemoteServer(this, prefs, this).also { it.start() }
+    }
+
+    private fun stopServer() {
+        session?.close("remote camera control turned off")
+        server?.stop()
+        server = null
+    }
+
     override fun onControllerAuthorized(link: RemoteServer.SignalingLink, controllerInfo: JSONObject): Boolean {
         if (session != null) return false
-        val s = ControllerSession(this, link, engine, recorder, prefs, tap, ::batteryPct) { done ->
+        val s = ControllerSession(this, link, engine, recorder, takes, prefs, tap, audio, ::batteryPct) { done ->
             ui.post { if (session === done) { session = null; hud.connected = false; hud.invalidate() } }
         }
         s.onIdentify = { ui.post { flashScreen() } }
@@ -168,13 +185,32 @@ class MainActivity : Activity(), RemoteServer.Listener {
     }
 
     // ------------------------------------------------------------------ local control
-    private fun toggleRecordLocal() {
-        if (recorder.isRecording) {
-            engine.setRecordSurface(null) { recorder.stop(); ui.post { session?.emitChanged(setOf("recording_state")); hud.invalidate() } }
-        } else {
-            val surface = recorder.prepare(engine.fps, engine.captureSize, engine.uprightDegrees) ?: run { toast("couldn't start recording"); return }
-            engine.setRecordSurface(surface) { recorder.start(); ui.post { session?.emitChanged(setOf("recording_state")); hud.invalidate() } }
+    private fun toggleRecord() {
+        if (!takes.toggle()) toast("Couldn't start recording")
+        hud.invalidate()
+    }
+
+    private fun setGain(percent: Int) {
+        prefs.audioGain = percent
+        audio.gain = percent / 100f
+    }
+
+    /** Volume buttons start/stop a take (Settings > Camera > Use Volume Button to Trigger Record). */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (started && prefs.volumeKeyRecords && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (event.repeatCount == 0) toggleRecord()
+            return true
         }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        if (started && prefs.volumeKeyRecords && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) true
+        else super.onKeyUp(keyCode, event)
+
+    @Deprecated("Activity back handling")
+    override fun onBackPressed() {
+        if (settings != null) closeSettings() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     private val refreshRunnable = object : Runnable {
@@ -184,6 +220,37 @@ class MainActivity : Activity(), RemoteServer.Listener {
         }
     }
 
+    // ------------------------------------------------------------------ settings
+    private fun openSettings(page: String?) {
+        val panel = settings ?: SettingsPanel(this, prefs, engine, object : SettingsPanel.Host {
+            override fun isRecording() = takes.active
+            override fun onFormatChanged() { ui.postDelayed({ session?.emitChanged(setOf("recording_format", "cam_framerate", "cam_frame_rate_range")); hud.invalidate() }, 300) }
+            override fun onAudioGainChanged(percent: Int) = setGain(percent)
+            override fun onRemoteChanged() {
+                if (prefs.remoteEnabled) { startServer(); server?.refreshAdvertisement() } else stopServer()
+                hud.invalidate()
+            }
+            override fun onMonitorChanged() { hud.invalidate() }
+            override fun onClose() = closeSettings()
+        }).also { p ->
+            // covers the camera area; the nav rail stays visible (Camera closes settings)
+            val railW = (194f * root.height / 1080f).toInt()
+            root.addView(p, FrameLayout.LayoutParams(root.width - railW, -1))
+            settings = p
+        }
+        panel.show(page ?: "root")
+        hud.settingsOpen = true
+        hud.invalidate()
+    }
+
+    private fun closeSettings() {
+        settings?.let { root.removeView(it) }
+        settings = null
+        hud.settingsOpen = false
+        hud.invalidate()
+    }
+
+    // ------------------------------------------------------------------ misc
     private fun flashScreen() {
         val flash = View(this).apply { setBackgroundColor(Color.WHITE) }
         root.addView(flash, FrameLayout.LayoutParams(-1, -1))
@@ -197,7 +264,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
 
-    /** Media: open the newest clip in the phone's player (or the clip folder if there is none yet). */
+    /** Media: open the newest clip in the phone's player. */
     private fun openMedia() {
         val uri = contentResolver.query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Video.Media._ID),
             "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?", arrayOf("%Movies/CineRemote%"),
@@ -219,39 +286,14 @@ class MainActivity : Activity(), RemoteServer.Listener {
         val msg = buildString {
             append("Camera: ${prefs.deviceName}\n")
             append("Address: ${ips.joinToString().ifEmpty { "no network" }}  (port 2222)\n\n")
-            append(if (session != null) "Connected to CineRemote." else "Waiting for CineRemote. It finds this camera automatically on the same Wi-Fi.")
+            append(when {
+                !prefs.remoteEnabled -> "Remote Camera Control is off (Settings)."
+                session != null -> "Connected to CineRemote."
+                else -> "Waiting for CineRemote. It finds this camera automatically on the same Wi-Fi."
+            })
             if (prefs.password == Prefs.DEFAULT_PASSWORD) append("\n\nUsing the default password - change it in Settings.")
         }
         AlertDialog.Builder(this).setTitle("Remote").setMessage(msg).setPositiveButton("OK", null).show()
-    }
-
-    private fun settingsDialog() {
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, 0) }
-        fun field(label: String, value: String, pw: Boolean = false): EditText {
-            box.addView(TextView(this).apply { text = label })
-            return EditText(this).apply {
-                setText(value)
-                if (pw) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                box.addView(this)
-            }
-        }
-        val name = field("Camera name", prefs.deviceName)
-        val slate = field("Camera letter", prefs.slate)
-        val pass = field("Remote password", prefs.password, pw = true)
-        AlertDialog.Builder(this)
-            .setTitle("CineRemote Camera")
-            .setView(box)
-            .setPositiveButton("Save") { _, _ ->
-                prefs.deviceName = name.text.toString()
-                prefs.slate = slate.text.toString()
-                prefs.password = pass.text.toString().ifBlank { prefs.password }
-                hud.deviceName = prefs.deviceName
-                if (::server.isInitialized) server.refreshAdvertisement()
-                hud.invalidate()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun buildUi() {
@@ -274,9 +316,9 @@ class MainActivity : Activity(), RemoteServer.Listener {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
         session?.close("activity destroyed")
-        if (::server.isInitialized) server.stop()
+        server?.stop()
         if (::recorder.isInitialized) { recorder.forceStopIfNeeded(); recorder.release() }
-        meter.stop()
+        if (::audio.isInitialized) audio.stop()
         if (::engine.isInitialized) engine.release()
         if (::tap.isInitialized) { tap.previewSink = null; preview.release(); tap.handler.post { tap.release() } }
     }

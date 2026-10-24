@@ -65,7 +65,17 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
         }
         val upright = VideoFrame(buf.applyTransformMatrix(m, buf.width, buf.height), 0, frame.timestampNs)
         previewSink?.onFrame(upright)
-        sink?.invoke(upright)
+        sink?.let { deliver ->
+            // the stream stays within 1080p: bigger formats (4K, open gate) are scaled on the GPU, whole frame kept
+            val ub = upright.buffer
+            if (ub.width.toLong() * ub.height > STREAM_MAX_PIXELS) {
+                val k = minOf(1920f / ub.width, 1080f / ub.height)
+                val w = (ub.width * k).toInt() and 1.inv(); val h = (ub.height * k).toInt() and 1.inv()
+                val scaled = VideoFrame(ub.cropAndScale(0, 0, ub.width, ub.height, w, h), 0, upright.timestampNs)
+                deliver(scaled)
+                scaled.release()
+            } else deliver(upright)
+        }
         stats(frame.timestampNs)
         if (frame.timestampNs - lastHistNs > 200_000_000L) {
             lastHistNs = frame.timestampNs
@@ -145,5 +155,6 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
     companion object {
         const val TAG = "CRCam.Tap"
         const val BINS = 64
+        const val STREAM_MAX_PIXELS = 1920L * 1088
     }
 }

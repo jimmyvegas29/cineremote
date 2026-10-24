@@ -2,7 +2,10 @@ package com.cineremote.camera
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.MediaRecorder
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Environment
 import android.os.ParcelFileDescriptor
@@ -10,36 +13,57 @@ import android.os.StatFs
 import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * Records the camera to H.264 + AAC MP4 files in Movies/CineRemote. The recorder owns its input surface
- * (valid between [prepare] and [stop]); the camera targets that surface only while a take runs, so the
- * capture session is rebuilt on start/stop (a ~200 ms hitch). Samsung rejects MediaCodec persistent input
- * surfaces here, so we use the recorder's own surface instead.
+ * Records takes to MP4 files in Movies/CineRemote: the hardware video encoder (H.264 or HEVC, at the chosen
+ * size and bit rate) reads frames from its input surface, which the camera targets only while a take runs,
+ * and AAC audio comes from [AudioInput] (already gained) via [onAudio]. Both are muxed on their own drain
+ * threads. Both are stamped on the monotonic clock (the camera service converts frame timestamps to it for
+ * video encoders, even where the camera itself reports boot time), so they line up; the file starts at the
+ * first video frame.
  */
 class Recorder(private val context: Context) {
-    private var recorder: MediaRecorder? = null
+    data class Config(val width: Int, val height: Int, val fps: Int, val hevc: Boolean, val bitrate: Int,
+                      val rotation: Int, val stereo: Boolean)
+
+    private var video: MediaCodec? = null
+    private var audio: MediaCodec? = null
+    private var muxer: MediaMuxer? = null
     private var pfd: ParcelFileDescriptor? = null
     private var uri: Uri? = null
+    private var cfg: Config? = null
     var inputSurface: Surface? = null
         private set
-    var width = 1920
-    var height = 1080
 
     @Volatile var startWallMs = 0L
         private set
     @Volatile var lastClipSecs = -1.0
         private set
     val isRecording get() = startWallMs > 0
+    /** Size and bit rate of the take in progress (or the last one). */
+    @Volatile var current: Config? = null
+        private set
 
-    /** Create and prepare a recorder; returns the surface the camera must target before [start].
-     *  [rotation] is written to the file so players show it upright (180 with the phone flipped). */
-    fun prepare(fps: Int, size: android.util.Size? = null, rotation: Int = 0): Surface? {
+    // muxing state (guarded by [lock])
+    private val lock = Object()
+    private var videoTrack = -1; private var audioTrack = -1
+    private var muxerStarted = false
+    private var firstVideoUs = -1L
+    private val lastPts = LongArray(2) { -1 }
+    private val pending = ArrayList<Pending>()
+    private class Pending(val video: Boolean, val data: ByteBuffer, val info: MediaCodec.BufferInfo)
+
+    @Volatile private var accepting = false
+    private var drains = emptyList<Thread>()
+
+    /** Create the encoders and the file; returns the surface the camera must target before [start]. */
+    fun prepare(c: Config): Surface? {
         release()
-        size?.let { width = it.width; height = it.height }
         val name = "CineRemote_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
@@ -49,39 +73,54 @@ class Recorder(private val context: Context) {
         }
         return try {
             val u = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)!!
-            val fd = context.contentResolver.openFileDescriptor(u, "w")!!
-            val r = MediaRecorder(context).apply {
-                setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
-                setVideoSource(MediaRecorder.VideoSource.SURFACE)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setOutputFile(fd.fileDescriptor)
-                setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-                setVideoSize(width, height)
-                setVideoFrameRate(fps)
-                setVideoEncodingBitRate(BITRATE)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(48000)
-                setAudioChannels(2)
-                setAudioEncodingBitRate(192_000)
-                setOrientationHint(rotation)
-                prepare()
+            uri = u
+            val fd = context.contentResolver.openFileDescriptor(u, "rw")!!
+            pfd = fd
+            val mime = Formats.mime(c.hevc)
+            val vf = MediaFormat.createVideoFormat(mime, c.width, c.height).apply {
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                setInteger(MediaFormat.KEY_BIT_RATE, c.bitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, c.fps)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
-            recorder = r; pfd = fd; uri = u
-            inputSurface = r.surface      // valid after prepare(), before stop()
-            Log.i(TAG, "prepared $name")
+            video = MediaCodec.createEncoderByType(mime).apply {
+                configure(vf, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                inputSurface = createInputSurface()
+            }
+            val ch = if (c.stereo) 2 else 1
+            val af = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, 48000, ch).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                setInteger(MediaFormat.KEY_BIT_RATE, if (c.stereo) 256_000 else 128_000)
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+            }
+            audio = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
+                configure(af, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            }
+            muxer = MediaMuxer(fd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply { setOrientationHint(c.rotation) }
+            cfg = c
+            Log.i(TAG, "prepared $name ${c.width}x${c.height}@${c.fps} ${if (c.hevc) "HEVC" else "H.264"} ${c.bitrate / 1_000_000} Mb/s")
             inputSurface
         } catch (e: Exception) {
             Log.e(TAG, "prepare recording", e)
             release()
+            discardFile()
             null
         }
     }
 
-    /** Begin writing (call once the camera is targeting [inputSurface]). */
+    /** Begin encoding (call once the camera is targeting [inputSurface]). */
     fun start(): Boolean {
-        val r = recorder ?: return false
+        val v = video ?: return false
+        val a = audio ?: return false
         return try {
-            r.start()
+            synchronized(lock) {
+                videoTrack = -1; audioTrack = -1; muxerStarted = false; firstVideoUs = -1
+                lastPts.fill(-1); pending.clear()
+            }
+            v.start(); a.start()
+            accepting = true
+            drains = listOf(Thread({ drain(v, true) }, "rec-video"), Thread({ drain(a, false) }, "rec-audio")).onEach { it.start() }
+            current = cfg
             startWallMs = System.currentTimeMillis()
             true
         } catch (e: Exception) {
@@ -90,19 +129,96 @@ class Recorder(private val context: Context) {
         }
     }
 
-    /** Stop writing and finalize the file (call after the camera stopped targeting [inputSurface]). */
-    fun stop() {
-        val r = recorder ?: return
-        val started = startWallMs
+    /** Gained interleaved stereo PCM from [AudioInput]; [ptsNs] is on the monotonic clock. */
+    fun onAudio(pcm: ShortArray, n: Int, ptsNs: Long) {
+        if (!accepting) return
+        val a = audio ?: return
+        val stereo = cfg?.stereo != false
         try {
-            r.stop()
-        } catch (e: Exception) {
-            Log.w(TAG, "stop (clip too short?)", e)
+            val idx = a.dequeueInputBuffer(5_000)
+            if (idx < 0) return
+            val bb = a.getInputBuffer(idx) ?: return
+            bb.clear()
+            val sb = bb.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+            val count: Int
+            if (stereo) { sb.put(pcm, 0, n); count = n }
+            else { var i = 0; while (i + 1 < n) { sb.put(((pcm[i] + pcm[i + 1]) / 2).toShort()); i += 2 }; count = n / 2 }
+            a.queueInputBuffer(idx, 0, count * 2, ptsNs / 1000, 0)
+        } catch (e: IllegalStateException) {
+            // encoder stopping
+        }
+    }
+
+    private fun drain(codec: MediaCodec, isVideo: Boolean) {
+        val info = MediaCodec.BufferInfo()
+        while (true) {
+            val idx = try { codec.dequeueOutputBuffer(info, 10_000) } catch (e: IllegalStateException) { break }
+            when {
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> synchronized(lock) {
+                    val m = muxer ?: return
+                    if (isVideo) videoTrack = m.addTrack(codec.outputFormat) else audioTrack = m.addTrack(codec.outputFormat)
+                    maybeStartMuxer()
+                }
+                idx >= 0 -> {
+                    val out = codec.getOutputBuffer(idx)
+                    if (out != null && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) write(isVideo, out, info)
+                    codec.releaseOutputBuffer(idx, false)
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                }
+            }
+        }
+    }
+
+    private fun write(isVideo: Boolean, buf: ByteBuffer, src: MediaCodec.BufferInfo) { synchronized(lock) {
+        var pts = src.presentationTimeUs
+        if (isVideo && firstVideoUs < 0) firstVideoUs = pts
+        if (firstVideoUs < 0 || pts < firstVideoUs) return          // audio from before the first frame
+        pts -= firstVideoUs
+        val t = if (isVideo) 0 else 1
+        if (pts <= lastPts[t]) pts = lastPts[t] + 1                 // the muxer wants rising timestamps
+        lastPts[t] = pts
+        val info = MediaCodec.BufferInfo().apply { set(0, src.size, pts, src.flags) }
+        buf.position(src.offset); buf.limit(src.offset + src.size)
+        if (muxerStarted) {
+            muxer?.writeSampleData(if (isVideo) videoTrack else audioTrack, buf, info)
+        } else {
+            pending += Pending(isVideo, ByteBuffer.allocate(src.size).put(buf).apply { flip() }, info)
+            // no audio track after ~2 s of video: write a picture-only file rather than nothing
+            if (pending.count { it.video } > 60 && audioTrack < 0 && videoTrack >= 0) maybeStartMuxer(force = true)
+        }
+    } }
+
+    private fun maybeStartMuxer(force: Boolean = false) {
+        val m = muxer ?: return
+        if (muxerStarted || videoTrack < 0 || (audioTrack < 0 && !force)) return
+        m.start()
+        muxerStarted = true
+        for (p in pending) {
+            val track = if (p.video) videoTrack else audioTrack
+            if (track >= 0) m.writeSampleData(track, p.data, p.info)
+        }
+        pending.clear()
+    }
+
+    /** Stop encoding and finalize the file (call after the camera stopped targeting [inputSurface]). */
+    fun stop() {
+        val started = startWallMs
+        accepting = false
+        runCatching { video?.signalEndOfInputStream() }
+        runCatching {
+            audio?.let { a -> val idx = a.dequeueInputBuffer(50_000); if (idx >= 0) a.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM) }
+        }
+        drains.forEach { it.join(3000) }
+        drains = emptyList()
+        val ok = synchronized(lock) {
+            val started2 = muxerStarted
+            runCatching { if (muxerStarted) muxer?.stop() }.onFailure { Log.w(TAG, "muxer stop", it) }
+            started2
         }
         lastClipSecs = if (started > 0) (System.currentTimeMillis() - started) / 1000.0 else 0.0
         startWallMs = 0
-        finishFile()
         release()
+        if (ok) finishFile() else discardFile()
     }
 
     private fun finishFile() {
@@ -114,30 +230,29 @@ class Recorder(private val context: Context) {
         pfd = null
     }
 
-    fun forceStopIfNeeded() {
-        if (recorder != null) {
-            runCatching { recorder?.stop() }
-            startWallMs = 0
-            finishFile()
-            release()
-        }
+    private fun discardFile() {
+        runCatching { pfd?.close() }
+        pfd = null
+        uri?.let { u -> runCatching { context.contentResolver.delete(u, null, null) } }
+        uri = null
     }
+
+    fun forceStopIfNeeded() { if (video != null) stop() }
 
     fun release() {
-        runCatching { recorder?.release() }
-        recorder = null
-        inputSurface = null
+        accepting = false
+        runCatching { video?.stop() }; runCatching { video?.release() }; video = null
+        runCatching { audio?.stop() }; runCatching { audio?.release() }; audio = null
+        runCatching { muxer?.release() }; muxer = null
+        runCatching { inputSurface?.release() }; inputSurface = null
     }
 
-    /** (total, free, runtime seconds at our bitrate) of the storage clips go to. */
-    fun storage(): Triple<Long, Long, Long> {
+    /** (total, free, runtime seconds at the current bit rate) of the storage clips go to. */
+    fun storage(bitrate: Int = current?.bitrate ?: 20_000_000): Triple<Long, Long, Long> {
         val st = StatFs(Environment.getExternalStorageDirectory().path)
         val free = st.availableBytes
-        return Triple(st.totalBytes, free, free * 8 / (BITRATE + 192_000))
+        return Triple(st.totalBytes, free, free * 8 / (bitrate + 256_000))
     }
 
-    companion object {
-        const val TAG = "CRCam.Recorder"
-        const val BITRATE = 20_000_000
-    }
+    companion object { const val TAG = "CRCam.Recorder" }
 }

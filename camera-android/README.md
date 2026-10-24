@@ -14,14 +14,26 @@ like any other camera — live preview, manual controls, recording.
 - Live **1080p H.264** video + audio to CineRemote over WebRTC.
 - Manual control from CineRemote: lens, frame rate, ISO, shutter, white balance, tint, exposure
   compensation, focus (and tap-to-focus), zoom, stabilization, torch.
-- Recording to `Movies/CineRemote/*.mp4` on the phone (1080p30, locked frame rate), started/stopped on the
-  phone or from CineRemote. Stream and recording stay upright with the phone either way round.
+- Recording to `Movies/CineRemote/*.mp4` on the phone, started/stopped on the phone (record button or a
+  volume key) or from CineRemote. **Resolution** Open Gate / 4K / 3K / 2K / HD with the **aspect ratios**
+  each offers (every size the lens and the hardware encoder can record, e.g. UHD 3840x2160, 4:3 open gate,
+  1:1, 2.22:1), **codec** H.264 or HEVC, and Low/Medium/High/Max **bit rate**. Locked frame rate; stream
+  and recordings stay upright with the phone either way round. The live stream stays at up to 1080p.
+- **Audio**: stereo AAC with an **Audio Gain** control (applied to the recording, the meters and the stream).
 - **On-phone camera UI** laid out like the Blackmagic Camera app: LENS · FPS · SHUTTER · IRIS readouts,
-  a running timecode (with frames) and ISO · WB · TINT across the top with blue "A" badges for automatic
-  values and a resolution/aspect badge; live RGB histogram, record-time/storage and stereo audio meter
-  panels along the bottom; a tool column (frame guides, autofocus, exposure, torch, record, lens/zoom,
-  stabilisation, front/back) and a Camera · Media · Remote · Settings rail. Tap a readout or tool to edit
-  it on a value ruler (with AUTO); tap the picture to focus.
+  a running timecode (with frames), ISO · WB · TINT with blue "A" badges, and a resolution/aspect badge
+  (tap it for Resolution); live RGB histogram (tap for an RGB parade), record-time/storage and audio meter
+  (tap for big meters + gain) panels; a tool column (guides, autofocus, exposure, record, lens/zoom,
+  stabilisation, front/back) and a Camera · Media · Remote · Settings rail.
+- Editors like the Blackmagic app's: rulers with AUTO, ISO preset buttons, white balance presets with a
+  Kelvin ruler and lock, shutter (auto exposure) lock, a lens row with the zoom ruler, and a guides
+  toolbar (torch, safe area, frame guides 2.76:1 … 1:1, grids).
+- **Settings**: Record (codec, bit rate, resolution/aspect), Camera (lock WB on record, volume-key record,
+  stabilisation), Audio (gain, stereo/mono), Monitor (guide/grid opacity, which panels show), Remote
+  Camera Control (on/off, name, letter, password).
+
+Not done yet (Blackmagic features with no equivalent here): LUTs, zebras / focus assist / false colour,
+presets, slate metadata, timelapse and off-speed, function buttons, live streaming, chat, proxies, cloud.
 
 Verified on a Samsung Galaxy S20 FE (Android 13) against CineRemote on Windows.
 
@@ -52,11 +64,14 @@ compiled into the APK by the Gradle protobuf plugin.
 | `RtcLink.kt` | WebRTC: data channel + sendonly H.264/Opus, non-trickle ICE |
 | `CameraController.kt` | the protobuf control protocol: properties in/out, preview, recording |
 | `CameraEngine.kt` | Camera2 pipeline and every manual control |
-| `Recorder.kt` | on-phone MP4 recording |
+| `Recorder.kt` | on-phone recording: hardware H.264/HEVC + AAC, muxed to MP4 |
+| `Takes.kt` | starts/stops takes (record button, volume key, CineRemote) |
+| `Formats.kt` | which resolutions/aspect ratios a lens + encoder can record, bit rates |
 | `ControllerSession.kt` | binds one controller's signaling + data channel + camera |
 | `FrameTap.kt` | the camera's GPU frame tap: turns frames upright, feeds the preview, stream and histogram |
-| `AudioMeter.kt` | input levels for the audio meter |
+| `AudioInput.kt` | the mic: gain, meter levels, PCM for the recorder |
 | `CameraHud.kt` | the on-phone camera screen |
-| `MainActivity.kt` | wiring, preview placement, settings / media / remote |
+| `SettingsPanel.kt` | the Settings screen |
+| `MainActivity.kt` | wiring, preview placement, media / remote |
 
 The UI font is [Lato](https://www.latofonts.com/) (SIL Open Font License, see `LATO_OFL.txt`).

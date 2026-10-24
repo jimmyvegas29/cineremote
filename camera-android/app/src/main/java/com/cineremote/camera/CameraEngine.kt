@@ -68,6 +68,11 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
     @Volatile var fps = prefs.fps
     @Volatile var torch = false
     @Volatile var stabilization = true
+    /** Auto-exposure / auto-white-balance hold (the lock buttons; WB is also held during takes if set). */
+    @Volatile var aeLock = false
+    @Volatile var awbLock = false
+    @Volatile private var awbLockForTake = false
+    fun lockWbForTake(on: Boolean) { awbLockForTake = on; apply() }
 
     // ---- live readings (from capture results)
     @Volatile var liveIso = 0; @Volatile var liveExposureNs = 0L; @Volatile var liveKelvin = 5600
@@ -118,21 +123,24 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         return list.sortedWith(compareBy({ it.facing == CameraCharacteristics.LENS_FACING_FRONT }, { it.equivMm }))
     }
 
-    /** The capture/stream size for the current lens: the largest ~16:9 size it actually supports (so the
-     *  SurfaceTexture/preview/recorder never stretch a 4:3 sensor output into a 16:9 buffer). */
-    val captureSize: android.util.Size get() = pick169(lens)
+    /** The recording format (Settings > Record > Resolution) resolved for the current lens; the camera
+     *  outputs exactly this size to the frame tap and the recorder, so nothing is ever stretched. */
+    @Volatile var format: FrameFormat = Formats.resolve(lens, prefs)
+        private set
+    val captureSize: android.util.Size get() = format.size
 
-    private fun pick169(l: Lens): android.util.Size {
-        val map = l.chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-        val sizes = (map?.getOutputSizes(android.graphics.SurfaceTexture::class.java)?.toList() ?: emptyList())
-            .ifEmpty { listOf(android.util.Size(1920, 1080)) }
-        val wide = sizes.filter { kotlin.math.abs(it.width.toFloat() / it.height - 16f / 9f) < 0.02f }
-            .filter { it.width <= 1920 && it.height <= 1080 }
-        val chosen = wide.maxByOrNull { it.width.toLong() * it.height }
-            ?: sizes.filter { it.width <= 1920 && it.height <= 1080 }.maxByOrNull { it.width.toLong() * it.height }
-            ?: android.util.Size(1280, 720)
-        Log.i(TAG, "lens ${l.id} capture size $chosen (of ${sizes.take(6)})")
-        return chosen
+    /** Choose a resolution bucket and frame size (or re-resolve after a codec change). Not during a take. */
+    fun setFormat(bucket: String? = null, key: String? = null) = handler.post {
+        if (recording) return@post
+        bucket?.let { prefs.resolution = it }
+        key?.let { prefs.frameSize = it }
+        val f = Formats.resolve(lens, prefs)
+        if (f == format) return@post
+        format = f
+        if (fps !in fpsChoices) selectFps(fpsChoices.lastOrNull { it <= 30 } ?: fpsChoices.firstOrNull() ?: 30)
+        onCaptureSizeChanged?.invoke(captureSize)
+        reopen()
+        listener.onCameraChanged(ALL_FIELDS + "recording_format")
     }
 
     val chars get() = lens.chars
@@ -145,9 +153,16 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 1f
         return r.lower * step to r.upper * step
     }
+    /** Frame rates the lens, the current format's size and the encoder all support. */
     val fpsChoices: List<Int> get() {
         val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: arrayOf(Range(30, 30))
-        return listOf(24, 25, 30, 48, 50, 60).filter { f -> ranges.any { it.lower <= f && it.upper >= f } }
+        val minFrameNs = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            ?.getOutputMinFrameDuration(android.graphics.SurfaceTexture::class.java, captureSize) ?: 0L
+        val caps = Formats.encoderCaps(prefs.hevc)
+        return listOf(24, 25, 30, 48, 50, 60).filter { f ->
+            ranges.any { it.lower <= f && it.upper >= f } && (minFrameNs <= 0 || minFrameNs <= 1_000_000_000L / f) &&
+                (caps?.areSizeAndRateSupported(captureSize.width, captureSize.height, f.toDouble()) ?: true)
+        }.ifEmpty { listOf(30) }
     }
     /** Fixed lens aperture (phones have no iris), shown greyed out like the Blackmagic app's IRIS. */
     val aperture: Float get() = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull() ?: 0f
@@ -189,6 +204,8 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
         lens = l
         if (l.facing == CameraCharacteristics.LENS_FACING_BACK) prefs.cameraId = id
         zoom = 1f
+        format = Formats.resolve(l, prefs)
+        if (fps !in fpsChoices) fps = fpsChoices.lastOrNull { it <= 30 } ?: 30
         onCaptureSizeChanged?.invoke(captureSize)
         reopen()
         listener.onCameraChanged(ALL_FIELDS)
@@ -265,9 +282,11 @@ class CameraEngine(context: Context, private val prefs: Prefs, private val liste
             b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
             val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 1f
             b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, (evStops / step).roundToInt())
+            b.set(CaptureRequest.CONTROL_AE_LOCK, aeLock)
         }
         if (wbAuto) {
             b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+            b.set(CaptureRequest.CONTROL_AWB_LOCK, awbLock || awbLockForTake)
         } else {
             b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
             b.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
