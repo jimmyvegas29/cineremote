@@ -52,7 +52,7 @@ the camera app you already use stays the camera.
 | 📡 **Finds your phones** | Phones running Blackmagic Camera show up automatically (mDNS / Bonjour). Or add one by IP address. |
 | 🎥 **Live monitor** | H.265 preview with audio at the phone's full frame rate. About **200 ms glass-to-glass** over Wi-Fi, of which the PC adds **under 10 ms**. |
 | 🎛️ **Full camera control** | Lens, frame rate, shutter, ISO, white balance, tint, exposure compensation, focus (with tap-to-focus on the picture), zoom, stabilization, torch, LUTs, slate (reel / scene / take) and the phone's own settings menu. |
-| ⏺️ **Recording** | Start and stop recording on the selected phone, or **Record all** on every connected phone at once, with timecode, remaining media and battery for each. |
+| ⏺️ **Recording** | Start and stop recording on the selected phone, roll every connected phone with **Record all**, or **arm** just the cameras you want and roll that group with **Record armed**. Timecode, remaining media and battery for each. |
 | 🧮 **Multi-camera** | Run several phones side by side: camera cards with live thumbnails, a **multiview** of every camera, slate letters (A, B, C…) and tally. |
 | 🔬 **Monitoring tools** | Histogram, focus peaking, zebras (95 %), false color, 2.39:1 guides and a thirds grid, computed on the PC from the decoded picture. |
 | 🟣 **OBS Studio source** | A native OBS plugin, **CineRemote Camera**: video **and** audio, one source per phone, with none of the app's overlays (the clean feed). |
@@ -129,7 +129,9 @@ Do this once on every phone:
 3. Click a setting tile (ISO, shutter, WB…) and then drag, scroll or use ← → on the ruler above it. **Auto**
    hands that setting back to the phone.
 4. Click anywhere on the picture to set the focus and exposure point.
-5. Press the big record button to record on the phone, or **Record all** to roll every camera together.
+5. Press the big record button to record on the selected phone, or **Record all** to roll every camera together.
+   To roll only some of them, click the **red ring** on those cameras' cards to arm them: the top button
+   becomes **Record armed (n)** and starts just the armed cameras. **Stop all** stops everything.
 
 The phone records at its own quality to its own storage. CineRemote shows a live preview stream, and that
 preview is what goes to OBS and the virtual webcam.
@@ -142,6 +144,7 @@ preview is what goes to OBS and the virtual webcam.
 | <kbd>←</kbd> <kbd>→</kbd> / mouse wheel | Step the selected setting |
 | Double-click a camera | Connect / disconnect |
 | Right-click a camera | Identify (flashes the phone), forget password, remove |
+| Red ring on a card | Arm / disarm the camera for **Record armed** |
 
 ## OBS Studio
 

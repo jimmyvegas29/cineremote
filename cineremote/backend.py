@@ -42,6 +42,7 @@ class CamHandle:
         self.instances = set()        # live mDNS instance names that map to this camera
         self.props = {}
         self.demo = None              # (photo, property overrides) for a --demo camera
+        self.armed = False            # record-armed: "Record armed" rolls only these cameras
 
 
 def _camera_key(service_name):
@@ -168,6 +169,7 @@ class Backend(QObject):
             h.password = "demo"
             h.discovered = True
             h.vcam_enabled = False    # don't register system webcams for pretend cameras
+            h.armed = bool(overrides.get("_armed"))
             if connected:
                 self.connect_camera(key)
         self.cameraListChanged.emit()

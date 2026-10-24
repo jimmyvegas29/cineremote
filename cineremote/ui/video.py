@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from . import model as M
 from . import theme as T
-from .widgets import paint_histogram
+from .widgets import METER_HOT_DB, METER_WARN_DB, level_to_frac, paint_histogram
 
 log = logging.getLogger("cineremote.ui.video")
 
@@ -438,12 +438,18 @@ class VideoView(QWidget):
                 break
         # mini meters
         mx, top, bot = r.right() - 22, r.top() + 44, r.bottom() - 62
+        zones = ((0.0, level_to_frac(METER_WARN_DB), T.METER_G),
+                 (level_to_frac(METER_WARN_DB), level_to_frac(METER_HOT_DB), T.METER_Y),
+                 (level_to_frac(METER_HOT_DB), 1.0, T.METER_R))
+        span = bot - top
         for ch in range(2):
-            frac = max(0.0, min(1.0, (h.audio_db[ch] + 50) / 50))
-            p.fillRect(QRectF(mx + ch * 8, top, 5, bot - top), QColor(255, 255, 255, 25))
-            hh = (bot - top) * frac
-            col = T.METER_R if frac > 0.88 else (T.METER_Y if frac > 0.7 else T.METER_G)
-            p.fillRect(QRectF(mx + ch * 8, bot - hh, 5, hh), col)
+            frac = level_to_frac(h.audio_db[ch])
+            x = mx + ch * 8
+            for z0, z1, col in zones:       # each zone: dim tint, lit up to the level (green/orange/red)
+                p.fillRect(QRectF(x, bot - z1 * span, 5, (z1 - z0) * span), QColor(col.red(), col.green(), col.blue(), 45))
+                if frac > z0:
+                    lit = min(frac, z1)
+                    p.fillRect(QRectF(x, bot - lit * span, 5, (lit - z0) * span), col)
 
 
 def hist_pixmap(hist, w, h, dpr=1.0, title=None):

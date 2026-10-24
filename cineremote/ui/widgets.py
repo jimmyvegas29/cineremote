@@ -88,6 +88,45 @@ class IconButton(QAbstractButton):
             p.drawText(QRectF(34, 0, r.width() - 34, r.height()), Qt.AlignVCenter | Qt.AlignLeft, self.text())
 
 
+    def set_label(self, text):
+        """Change the text and resize to fit (toolbar buttons have a fixed width)."""
+        if text != self.text():
+            self.setText(text)
+            self.setFixedSize(34 + (T.text_width(T.ui_font(13, QFont.DemiBold), text) + 10 if text else 0), 34)
+
+
+class ArmButton(QAbstractButton):
+    """Record-arm toggle for a camera card: a ring that fills red when armed."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(22, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        c = QRectF(self.rect()).center()
+        on = self.isChecked()
+        ring = T.REC if on else (T.TEXT2 if self._hover else T.TEXT3)
+        p.setPen(QPen(ring, 1.6))
+        p.setBrush(QColor(229, 50, 45, 45) if on else Qt.NoBrush)
+        p.drawEllipse(c, 9, 9)
+        p.setPen(Qt.NoPen)
+        p.setBrush(T.REC if on else (QColor(229, 50, 45, 140) if self._hover else T.TEXT3))
+        p.drawEllipse(c, 4.5, 4.5)
+
+
 class Segmented(QWidget):
     """Two or more mutually exclusive options in a pill track."""
     changed = Signal(int)
@@ -461,6 +500,26 @@ def level_to_frac(db, floor=-50.0):
     return max(0.0, min(1.0, (db - floor) / -floor))
 
 
+METER_WARN_DB, METER_HOT_DB = -12.0, -6.0     # orange from -12 dBFS, red from -6 dBFS
+
+
+def meter_zone(frac, floor=-50.0):
+    """Zone colour of the meter segment at `frac` (0 = floor, 1 = 0 dBFS)."""
+    db = floor + frac * -floor
+    return T.METER_R if db >= METER_HOT_DB else (T.METER_Y if db >= METER_WARN_DB else T.METER_G)
+
+
+def meter_segment(i, n, lit, pk):
+    """Colour of segment i of n: lit in its zone colour, the peak-hold segment bright, the rest a dim tint of
+    the zone so the orange and red sections always show (as on the phone app's meters)."""
+    base = meter_zone((i + 0.5) / n)
+    if i < lit:
+        return base
+    if i == pk and pk > 0:
+        return base.lighter(135)
+    return QColor(base.red(), base.green(), base.blue(), 45)
+
+
 class PeakHold:
     """Peak marker that holds for 1.5 s and then falls 20 dB/s."""
 
@@ -530,16 +589,8 @@ class VMeter(QWidget):
             lit = level_to_frac(self.levels[ch]) * n
             pk = int(level_to_frac(self.peaks[ch].db) * n)
             for i in range(n):
-                frac = i / n
                 y = bot - (i + 1) * (seg_h + gap) + gap
-                base = T.METER_G if frac < 0.7 else (T.METER_Y if frac < 0.88 else T.METER_R)
-                if i < lit:
-                    c = base
-                elif i == pk and pk > 0:
-                    c = QColor("#c9f7d7")
-                else:
-                    c = QColor(255, 255, 255, 16)
-                p.fillRect(QRectF(x, y, 11, seg_h), c)
+                p.fillRect(QRectF(x, y, 11, seg_h), meter_segment(i, n, lit, pk))
         p.setFont(T.num_font(11))
         p.setPen(T.TEXT)
         p.drawText(QRectF(0, r.height() - 24, r.width(), 16), Qt.AlignCenter, self.gain_text)
@@ -585,15 +636,7 @@ class HMeter(QWidget):
             lit = level_to_frac(self.levels[ch]) * n
             pk = int(level_to_frac(self.peaks[ch].db) * n)
             for i in range(n):
-                frac = i / n
-                base = T.METER_G if frac < 0.7 else (T.METER_Y if frac < 0.88 else T.METER_R)
-                if i < lit:
-                    c = base
-                elif i == pk and pk > 0:
-                    c = QColor("#c9f7d7")
-                else:
-                    c = QColor(base.red(), base.green(), base.blue(), 50)
-                p.fillRect(QRectF(x0 + i * (seg_w + gap), y, seg_w, 10), c)
+                p.fillRect(QRectF(x0 + i * (seg_w + gap), y, seg_w, 10), meter_segment(i, n, lit, pk))
         p.setFont(T.num_font(10.5, QFont.Medium))
         p.setPen(T.TEXT2)
         for db in self.SCALE:

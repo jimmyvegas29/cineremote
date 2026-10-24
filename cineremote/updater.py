@@ -136,22 +136,23 @@ def download(info, progress=None):
     return path
 
 
-def apply(path):
+def apply(path, relaunch=True):
     """Start installing the downloaded update. The caller quits the app right after this returns."""
     kind = install_kind()
     if kind == "windows":
         # Inno Setup: no wizard pages, closes the running app, relaunches it when done (see cineremote.iss)
-        subprocess.Popen([path, "/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS",
-                          "/relaunch=1"], close_fds=True)
+        args = [path, "/SILENT", "/SP-", "/NOCANCEL", "/CLOSEAPPLICATIONS"]
+        subprocess.Popen(args + (["/relaunch=1"] if relaunch else ["/VERYSILENT", "/SUPPRESSMSGBOXES"]),
+                         close_fds=True)
     elif kind == "macos":
-        _apply_macos(path)
+        _apply_macos(path, relaunch)
     elif kind == "appimage":
-        _apply_appimage(path)
+        _apply_appimage(path, relaunch)
     else:
         raise UpdateError("running from source: update with git pull")
 
 
-def _apply_macos(path):
+def _apply_macos(path, relaunch=True):
     app = _app_bundle()
     stage = os.path.join(os.path.dirname(path), "stage")
     # ditto (not zipfile) keeps the executable bits, symlinks and signature of the bundle
@@ -163,15 +164,34 @@ def _apply_macos(path):
     script = (f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.3; done\n'
               f'rm -rf "{app}.old" && mv "{app}" "{app}.old" && mv "{new}" "{app}" && rm -rf "{app}.old"\n'
               f'xattr -dr com.apple.quarantine "{app}" 2>/dev/null\n'
-              f'open "{app}"\n')
+              + (f'open "{app}"\n' if relaunch else ""))
     subprocess.Popen(["/bin/sh", "-c", script], start_new_session=True, close_fds=True)
 
 
-def _apply_appimage(path):
+def _apply_appimage(path, relaunch=True):
     target = os.environ["APPIMAGE"]
     tmp = target + ".new"
     shutil.copyfile(path, tmp)
     os.chmod(tmp, 0o755)
     os.replace(tmp, target)       # the running image stays mapped; the file on disk is the new one
+    if not relaunch:
+        return
     script = f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.3; done\nexec "{target}"\n'
     subprocess.Popen(["/bin/sh", "-c", script], start_new_session=True, close_fds=True)
+
+
+def update_now(log=print):
+    """Headless update (`CineRemote --update-now`): install the latest release if it's newer, no relaunch.
+    Returns a process exit code: 0 updated or already current, 1 failed."""
+    try:
+        info = check()
+        if not info["newer"]:
+            log(f"up to date ({__version__}; latest {info['version'] or 'none'})")
+            return 0
+        log(f"updating {__version__} -> {info['version']}")
+        apply(download(info), relaunch=False)
+        log("update started")
+        return 0
+    except Exception as e:
+        log(f"update failed: {e}")
+        return 1

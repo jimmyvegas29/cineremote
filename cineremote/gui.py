@@ -78,7 +78,8 @@ class TopBar(QWidget):
         self.view = Segmented(["Studio", "Camera"])
         self.view.setToolTip("Studio view (Ctrl+1) · Camera view, laid out like the phone app (Ctrl+2)")
         self.multi = IconButton(T.IC_MULTI, "Multiview", checkable=True, tooltip="See every connected camera (Ctrl+M)")
-        self.rec_all = IconButton(T.IC_RECORD, "Record all", kind="rec", tooltip="Start recording on every connected phone")
+        self.rec_all = IconButton(T.IC_RECORD, "Record all", kind="rec", tooltip="Start recording on every connected "
+                                  "phone (arm cameras with the red ring on their cards to record only those)")
         self.stop_all = IconButton(T.IC_STOP, "Stop all", tooltip="Stop recording on every phone")
         self.settings = IconButton(T.IC_SETTINGS, "Camera settings", tooltip="The phone's own settings menu")
         self.slate = IconButton(T.IC_TAG, "Slate", tooltip="Reel, scene, take and production details")
@@ -215,6 +216,7 @@ class MainWindow(QMainWindow):
                 self._known.add(k)
                 restore_audio_settings(self.backend, k)
         self.studio.sidebar.rebuild(items)
+        self.update_record_button()
         self.camera.set_keys([k for k, _ in items])
         if self.top.multi.isChecked():
             self.studio.multi.rebuild(self._live_keys())
@@ -378,10 +380,21 @@ class MainWindow(QMainWindow):
         if h and h.session:
             self.ctl.send("stop_recording" if M.recording(h) else "start_recording")
 
+    def record_targets(self):
+        """Connected cameras the Record button starts: the armed ones, or all when none is armed."""
+        live = [(k, h) for k, h in self._visible_cams() if h.session]
+        armed = [(k, h) for k, h in live if h.armed]
+        return armed or live, bool(armed)
+
+    def update_record_button(self):
+        targets, armed = self.record_targets()
+        self.top.rec_all.set_label(f"Record armed ({len(targets)})" if armed else "Record all")
+
     def record_all(self, start):
-        for k, h in list(self.backend.cams.items()):
-            if h.session:
-                self.backend.call(k, "start_recording" if start else "stop_recording")
+        """Start: the armed cameras (all, if none is armed). Stop: every camera that's recording."""
+        cams = self.record_targets()[0] if start else [(k, h) for k, h in self.backend.cams.items() if h.session]
+        for k, h in cams:
+            self.backend.call(k, "start_recording" if start else "stop_recording")
 
     def open_audio(self, anchor, where):
         if not self.current:
@@ -525,7 +538,15 @@ def main():
     ap.add_argument("--select", type=int, help="dev/test: select the Nth camera in the list")
     ap.add_argument("--remove-webcams", action="store_true", help="unregister this user's virtual webcams and exit "
                                                                     "(the Windows uninstaller runs this)")
+    ap.add_argument("--update-now", action="store_true", help="install the latest GitHub release if newer, then exit")
     args, _ = ap.parse_known_args()
+    if args.update_now:
+        with open(os.path.join(tempfile.gettempdir(), "cineremote-update.log"), "a", encoding="utf-8") as f:
+            def log(m):
+                print(m)
+                f.write(m + "\n")
+                f.flush()
+            return updater.update_now(log)
     if args.remove_webcams:
         if vcam_mod.PLATFORM == "windows" and vcam_mod.is_installed():
             m = vcam_mod.VirtualCameraManager()

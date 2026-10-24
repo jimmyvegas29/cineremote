@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+
+- **Record-arm:** a red ring on each camera card arms that camera. With any camera armed, the top button
+  becomes **Record armed (n)** and rolls only the armed cameras; with none armed it stays **Record all**.
+  Arm state is remembered per camera. **Stop all** still stops every camera.
+- **Audio meters** show their zones all the time, like the phone app's: green, **orange from -12 dBFS** and
+  **red from -6 dBFS** (unlit segments are tinted, peak markers take their zone's colour). The multiview
+  tiles' mini meters are zoned the same way.
+- The camera card's preview switch lost its "LIVE" caption (it clashed with the connection status chip);
+  hover it for what it does.
+- `--update-now` installs the latest release from the command line (for scripted installs and testing).
+- Running from source on Linux now requires Python 3.12+ (PySide6's Linux build crashes on 3.11).
+
 ## 1.0.0
 
 First public release.

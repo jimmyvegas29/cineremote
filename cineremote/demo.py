@@ -24,10 +24,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PHOTO_DIRS = [os.path.join(HERE, "..", "assets", "demo"), os.path.join(HERE, "assets", "demo")]
 MM_AUTO, MM_MANUAL = 1, 2
 
-# name, photo, connected at start, overrides of the base property set (+ "_rec": seconds already recorded)
+# name, photo, connected at start, overrides of the base property set
+# (+ "_rec": seconds already recorded, "_armed": armed for Record armed)
 CAMERAS = [
     ("Pixel 10 Pro (A)", "studio-wide.jpg", True, {
-        "_rec": 754,
+        "_rec": 754, "_armed": True,
         "battery": {"available_percentage": 0.86},
         "cam_sensibility": {"metering_mode": "METERING_MODE_MANUAL", "sensibility_iso": 400},
         "cam_shutter": {"metering_mode": "METERING_MODE_MANUAL", "shutter_speed": {"num": 1, "den": 60}},
@@ -36,7 +37,7 @@ CAMERAS = [
         "active_cam": {"camera_id": "Lens25mm", "is_auto": False},
         "cam_stabilization": {"level": "STABILIZATION_LEVEL_STANDARD"}}),
     ("Galaxy S24 Ultra (B)", "studio-angle.jpg", True, {
-        "_rec": 751,
+        "_rec": 751, "_armed": True,
         "battery": {"available_percentage": 0.64},
         "cam_sensibility": {"metering_mode": "METERING_MODE_MANUAL", "sensibility_iso": 640},
         "cam_shutter": {"metering_mode": "METERING_MODE_MANUAL", "shutter_speed": {"num": 1, "den": 60}},
@@ -88,6 +89,7 @@ class DemoSession:
         raw = _base_props()
         raw.update(overrides)
         rec = raw.pop("_rec", None)
+        raw.pop("_armed", None)
         self.props = {k: _to_msg(k, v) for k, v in raw.items() if k in pm.Property.DESCRIPTOR.fields_by_name}
         self._stop = threading.Event()
         self._thread = None
@@ -183,10 +185,11 @@ class DemoSession:
                 next_t = time.monotonic()     # fell behind: don't try to catch up with a burst
 
     def _audio(self, t):
-        """1/30 s of quiet room tone with a speech-like envelope, so the meters and OBS audio move."""
+        """1/30 s of speech-like noise, so the meters (all three zones) and OBS audio move."""
         samples = 1600
-        env = 0.08 + 0.12 * max(0.0, math.sin(t * 2.3)) * (0.6 + 0.4 * math.sin(t * 7.1))
-        noise = np.random.default_rng().standard_normal((samples, 2)) * env * 0.35
+        # speech-like: room tone around -30 dBFS, phrases peaking into orange, the odd red burst
+        env = 0.03 + 0.30 * max(0.0, math.sin(t * 2.3)) * (0.55 + 0.45 * math.sin(t * 7.1)) ** 2
+        noise = np.random.default_rng().standard_normal((samples, 2)) * env
         pcm = np.clip(noise * 32767, -32768, 32767).astype(np.int16).reshape(1, -1)
         fr = av.AudioFrame.from_ndarray(pcm, format="s16", layout="stereo")
         fr.sample_rate = 48000

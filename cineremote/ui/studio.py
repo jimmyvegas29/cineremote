@@ -9,14 +9,16 @@ from . import model as M
 from . import theme as T
 from .audio import gain_text
 from .video import ThumbSource, VideoView
-from .widgets import ParamTile, RecordButton, ScrubRuler, Switch, VMeter
+from .widgets import ArmButton, ParamTile, RecordButton, ScrubRuler, Switch, VMeter
 
 
 # ---------------------------------------------------------------------------- sidebar cards
 class CameraCard(QWidget):
     """One camera in the sidebar. The blue ring marks the selected camera; the Live switch turns the
-    card's moving thumbnail off (saved per camera) for people who don't want motion in two places."""
+    card's moving thumbnail off (saved per camera) for people who don't want motion in two places.
+    The red ring arms the camera for recording, so Record armed rolls a chosen group (also saved)."""
     clicked = Signal(str)
+    armChanged = Signal(str, bool)
     doubleClicked = Signal(str)
     menuRequested = Signal(str, object)
     PAD = 10
@@ -34,12 +36,15 @@ class CameraCard(QWidget):
         self.setSizePolicy(sp)
         self.sw = Switch(self.live_preview, self)
         self.sw.setFixedSize(30, 17)
-        self.sw.setToolTip("Live preview in this card")
+        self.sw.setToolTip("Moving picture in this card (off: status only)")
         self.sw.toggled.connect(self._toggle_live)
-        self.sw_label = QLabel("LIVE", self)
-        self.sw_label.setFont(T.label_font(9))
-        self.sw_label.setStyleSheet(f"color: {T.TEXT3.name()};")
-        self.sw_label.setToolTip(self.sw.toolTip())
+        self.arm = ArmButton(self)
+        self.arm.setToolTip("Arm for recording: when any camera is armed, Record armed starts only those")
+        saved = self.settings.value(f"cards/{key}/armed")
+        self.arm.setChecked(str(saved).lower() == "true" if saved is not None else bool(self.h and self.h.armed))
+        if self.h is not None:
+            self.h.armed = self.arm.isChecked()
+        self.arm.toggled.connect(self._toggle_arm)
 
     @property
     def h(self):
@@ -53,6 +58,13 @@ class CameraCard(QWidget):
         self.live_preview = on
         self.settings.setValue(f"cards/{self.key}/live", on)
         self.updateGeometry()
+        self.update()
+
+    def _toggle_arm(self, on):
+        if self.h is not None:
+            self.h.armed = on
+        self.settings.setValue(f"cards/{self.key}/armed", on)
+        self.armChanged.emit(self.key, on)
         self.update()
 
     # -- layout (shared by sizeHint, paint and the switch position)
@@ -85,12 +97,11 @@ class CameraCard(QWidget):
     def _place_switch(self):
         show = not self.compact()
         self.sw.setVisible(show)
-        self.sw_label.setVisible(show)
+        self.arm.setVisible(show)
         if show:
             y = int(self._name_y())
             self.sw.move(self.width() - 12 - self.sw.width(), y + 2)
-            self.sw_label.adjustSize()
-            self.sw_label.move(self.sw.x() - 6 - self.sw_label.width(), y + 4)
+            self.arm.move(self.sw.x() - 8 - self.arm.width(), y - 1)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.RightButton:
@@ -158,7 +169,7 @@ class CameraCard(QWidget):
         T.slate_badge(p, 12, y, M.slate_letter(h), 20)
         p.setPen(T.TEXT)
         p.setFont(T.ui_font(13.5, QFont.DemiBold))
-        name_right = self.sw_label.x() - 8 if self.sw_label.isVisible() else r.width() - 12
+        name_right = self.arm.x() - 6 if self.arm.isVisible() else r.width() - 12
         p.drawText(QRectF(39, y, max(20, name_right - 39), 20), Qt.AlignVCenter,
                    p.fontMetrics().elidedText(M.short_name(h), Qt.ElideRight, int(max(20, name_right - 39))))
         y += 28
@@ -285,6 +296,7 @@ class Sidebar(QWidget):
                 c.clicked.connect(self.win.select_key)
                 c.doubleClicked.connect(self.win.toggle_connect)
                 c.menuRequested.connect(self.win.camera_menu)
+                c.armChanged.connect(lambda *_: self.win.update_record_button())
             self.list.removeWidget(c)
             self.list.insertWidget(i, c)
         live = sum(1 for _, h in items if h.session)

@@ -28,7 +28,7 @@ REC_DARK = QColor("#c0201c")
 OK = QColor("#2ecc71")
 WARN = QColor("#f5c518")
 GLASS = QColor(14, 16, 19, 190)
-METER_G, METER_Y, METER_R = QColor("#22c55e"), QColor("#eab308"), QColor("#ef4444")
+METER_G, METER_Y, METER_R = QColor("#22c55e"), QColor("#f59e0b"), QColor("#ef4444")   # green, orange, red
 
 WINDOWS = sys.platform == "win32"
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
