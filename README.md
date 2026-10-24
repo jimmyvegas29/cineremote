@@ -341,7 +341,7 @@ control sets what it passes on to OBS and to *Listen on PC*. The phone's own rec
 
 ## Contributing
 
-Issues and pull requests are welcome. If CineRemote doesn't work with your phone, please open an issue with
+Issues and pull requests are welcome. Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how the protocol, threads, outputs, packaging and updater fit together) and [CLAUDE.md](CLAUDE.md) (run/test commands, invariants, release steps). If CineRemote doesn't work with your phone, please open an issue with
 the phone model, the Blackmagic Camera app version and the log file (`cineremote.log` in your temp folder).
 
 ## Credits
