@@ -59,7 +59,13 @@ then
 fi
 rm -rf "$MNT/.fseventsd"
 sync
-hdiutil detach -quiet "$MNT" || { sleep 2; hdiutil detach -force -quiet "$MNT"; }
+# Finder can hold the volume for a few seconds after the layout script: retry, then force.
+detached=""
+for i in 1 2 3 4 5 6; do
+  if hdiutil detach "$MNT" >/dev/null 2>&1; then detached=1; break; fi
+  echo "[dmg] detach retry $i" >&2; sleep $((i * 2))
+done
+[ -n "$detached" ] || hdiutil detach -force "$MNT"
 rm -f "$DMG"
 retry hdiutil convert "$RW" -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -rf "$RW" "$STAGE"
