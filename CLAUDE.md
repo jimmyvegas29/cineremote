@@ -57,7 +57,7 @@ Native parts: `obs-plugin\build.bat` / `build_linux.sh` / `OBS_UNIVERSAL=1 build
 5. `.github/workflows/build.yml` builds Windows, Linux, macOS arm64 + Intel, smoke-tests each, and the
    `release` job publishes all files + `SHA256SUMS.txt`. The tag must equal `__version__` or the release
    job fails. Watch with `gh run watch <id> -R jimmyvegas29/cineremote --exit-status`.
-6. Check `gh release view vx.y.z -R jimmyvegas29/cineremote` lists 8 assets, then test the update from
+6. Check `gh release view vx.y.z -R jimmyvegas29/cineremote` lists 10 assets, then test the update from
    the previous version (`CineRemote --update-now`, or the Update available button).
 
 Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the current model).

@@ -91,9 +91,13 @@ Download the file for your computer from the
 | Your computer | Download | Then |
 |---|---|---|
 | **Windows 10 / 11** (64-bit) | `CineRemote-<version>-windows-x64-setup.exe` | Run it. The installer adds CineRemote, the OBS source and the virtual webcam (each can be unticked). |
-| **macOS 12+**, Apple Silicon | `CineRemote-<version>-macos-arm64.zip` | Unzip, then drag **CineRemote.app** into Applications. |
-| **macOS 12+**, Intel | `CineRemote-<version>-macos-x86_64.zip` | Same as above. |
+| **macOS 12+**, Apple Silicon (M1 and later) | `CineRemote-<version>-macos-arm64.dmg` | Open it and drag **CineRemote** onto **Applications**. |
+| **macOS 12+**, Intel | `CineRemote-<version>-macos-x86_64.dmg` | Same as above. |
 | **Linux** (x86-64) | `CineRemote-<version>-linux-x86_64.AppImage` | `chmod +x CineRemote-*.AppImage`, then run it. |
+
+Not sure which Mac you have? Apple menu ▸ **About This Mac**: "Chip: Apple M…" = Apple Silicon,
+"Processor: Intel" = Intel. (The `.zip` files next to the `.dmg`s hold the same app; the in-app updater uses
+them.)
 
 The OBS source on macOS and Linux is a separate download from the same release: `cineremote-obs-<version>-macos-universal.zip`
 and `cineremote-obs-<version>-linux-x86_64.tar.gz` ([installing it](#obs-studio)). Every release lists

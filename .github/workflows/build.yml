@@ -138,7 +138,7 @@ jobs:
         run: pip install -r requirements.txt ${{ env.PYINSTALLER }}
       - name: Smoke test (source)
         run: python cineremote.py --demo --quit-after 6
-      - name: Bundle app
+      - name: Bundle app (.zip for the updater, .dmg for people)
         run: bash packaging/macos/build_app.sh
       - name: Smoke test (bundle)
         run: dist/CineRemote.app/Contents/MacOS/CineRemote --demo --quit-after 8
@@ -151,7 +151,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

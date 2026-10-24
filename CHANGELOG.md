@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2
+
+- **macOS disk image:** each release now has a `.dmg` for Apple Silicon and for Intel - open it and drag
+  CineRemote onto Applications. The `.zip` files stay (the in-app updater uses them).
+- README: current macOS first-launch steps (*System Settings ▸ Privacy & Security ▸ Open Anyway*), since
+  right-click ▸ Open no longer bypasses the check on recent macOS.
+
 ## 1.1.1
 
 - Fixed: the update check could fail to verify github.com's certificate - always on macOS (the app had no
