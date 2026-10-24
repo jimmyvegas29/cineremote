@@ -101,9 +101,12 @@ SHA-256 checksums in `SHA256SUMS.txt`.
 
 > [!IMPORTANT]
 > **macOS:** the app isn't notarized by Apple (that requires a paid developer account), so the first time you
-> open it, **right-click CineRemote.app ▸ Open ▸ Open**. If macOS says the app "is damaged", run
-> `xattr -dr com.apple.quarantine /Applications/CineRemote.app` in Terminal. When macOS asks whether
-> CineRemote may **find devices on your local network**, click **Allow**, or it can't see your phones.
+> open it macOS says it *could not verify CineRemote is free of malware*. Click **Done**, then open
+> **System Settings ▸ Privacy & Security**, scroll to *"CineRemote" was blocked…* and click **Open Anyway**
+> (on macOS 14 and older, right-click the app ▸ **Open** also works). Or run this once in Terminal:
+> `xattr -dr com.apple.quarantine /Applications/CineRemote.app`. Updates installed by the app itself don't
+> ask again. When macOS asks whether CineRemote may **find devices on your local network**, click
+> **Allow**, or it can't see your phones.
 
 > [!TIP]
 > **Windows SmartScreen** may warn about an unrecognized app on first run, since the installer isn't
