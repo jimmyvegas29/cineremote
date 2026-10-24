@@ -93,10 +93,9 @@ class DemoSession:
         self.props = {k: _to_msg(k, v) for k, v in raw.items() if k in pm.Property.DESCRIPTOR.fields_by_name}
         self._stop = threading.Event()
         self._thread = None
-        self._rec_t0 = None if rec is None else time.monotonic() - rec
+        self._rec_start = None             # wall-clock start of the current recording
         if rec is not None:
-            self.props["recording_state"] = pm.msg("RecordingStateProperty")(is_recording=True,
-                                                                              is_writing_to_storage=True)
+            self.props["recording_state"] = self._rec_state(start=time.time() - rec)
         self._t0 = time.monotonic()
         self._img = self._load(photo)
 
@@ -175,8 +174,6 @@ class DemoSession:
                 self.stats["fps"] = n_fps / (now - t_fps)
                 t_fps, n_fps = now, 0
             self._audio(t)
-            if n % 10 == 0:
-                self._tick_props()
             next_t += period
             delay = next_t - time.monotonic()
             if delay > 0:
@@ -196,17 +193,18 @@ class DemoSession:
         self.stats["audio_frames"] += 1
         self.on_audio(fr)
 
-    def _tick_props(self):
-        rs = self.props.get("recording_state") or pm.msg("RecordingStateProperty")()
-        m = pm.msg("RecordingStateProperty")()
-        m.CopyFrom(rs)
-        lt = time.localtime()
-        secs = lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec + time.time() % 1
-        m.system_timecode.seconds, m.system_timecode.frame_count = int(secs), int((secs % 1) * self.fps)
-        if self._rec_t0 is not None:
-            d = time.monotonic() - self._rec_t0
-            m.recorded_duration.seconds, m.recorded_duration.frame_count = int(d), int((d % 1) * self.fps)
-        self._store("recording_state", m)
+    def _rec_state(self, start=None, clip=None):
+        """recording_state the way the phones send it (see model.timecode): while recording,
+        system_timecode = wall-clock START (Unix seconds + frames) and nothing ticks; after a stop,
+        recorded_duration = the clip's length."""
+        m = pm.msg("RecordingStateProperty")(is_recording=start is not None, is_writing_to_storage=start is not None,
+                                             timecode_mode=pm.enum_value("TimeCodeMode", "TIME_CODE_MODE_RECORD_RUN"))
+        if start is not None:
+            self._rec_start = start
+            m.system_timecode.seconds, m.system_timecode.frame_count = int(start), int((start % 1) * self.fps)
+        if clip is not None:
+            m.recorded_duration.seconds, m.recorded_duration.frame_count = int(clip), int((clip % 1) * self.fps)
+        return m
 
     # ------------------------------------------------------------------ commands (same names as CameraSession)
     async def write(self, field, value_msg, override_confirm=False):
@@ -282,16 +280,13 @@ class DemoSession:
         self._store("slate", m)
 
     async def start_recording(self, dim_screen=False):
-        self._rec_t0 = time.monotonic()
-        m = pm.msg("RecordingStateProperty")(is_recording=True, is_writing_to_storage=True)
-        self._store("recording_state", m)
-        self._tick_props()
+        self._store("recording_state", self._rec_state(start=time.time()))
         return "START_RECORDING_STATUS_OK"
 
     async def stop_recording(self):
-        self._rec_t0 = None
-        self._store("recording_state", pm.msg("RecordingStateProperty")(is_recording=False))
-        self._tick_props()
+        clip = time.time() - self._rec_start if self._rec_start is not None else 0.0
+        self._rec_start = None
+        self._store("recording_state", self._rec_state(clip=clip))
         return "STOP_RECORDING_STATUS_OK"
 
     async def pause_recording(self):

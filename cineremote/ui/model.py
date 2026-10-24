@@ -4,6 +4,7 @@ Each Param turns the camera's properties (CamHandle.props) into what a tile/read
 context line, the auto state, and either a list of choices or a numeric range for the scrub ruler - and
 knows which session command sets it. Views only paint; they never interpret protobuf themselves.
 """
+import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -318,13 +319,46 @@ def recording(h):
     return bool(rs and rs.is_recording)
 
 
+def _playback_fps(h):
+    fr = h.props.get("cam_framerate") if h else None
+    if fr and fr.playback_frame_rate.num:
+        return fr.playback_frame_rate.num / max(fr.playback_frame_rate.den, 1)
+    return 30.0
+
+
+def _fmt_tc(seconds, fps):
+    s = max(0, int(seconds))
+    f = min(int((seconds - int(seconds)) * fps), max(int(round(fps)) - 1, 0)) if seconds > 0 else 0
+    return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}:{f:02d}"
+
+
+def recording_elapsed(h):
+    """Seconds into the current recording. The phones don't send a running count: while recording,
+    system_timecode is the wall-clock START (Unix seconds + frames) and the controller counts from it,
+    as Blackmagic's own controller does. Without a usable start (missing, or the phone's clock disagrees
+    with ours by more than a day) count from when we saw recording begin (CamHandle.rec_started)."""
+    rs = h.props.get("recording_state") if h else None
+    if rs is not None and rs.system_timecode.seconds:
+        el = time.time() - (rs.system_timecode.seconds + rs.system_timecode.frame_count / _playback_fps(h))
+        if -2 <= el < 86400:
+            return max(0.0, el)
+    t0 = getattr(h, "rec_started", None)
+    return time.monotonic() - t0 if t0 else 0.0
+
+
 def timecode(h):
+    """Recording: elapsed time of the take. Idle: length of the last clip (recorded_duration), else zeros.
+    (Never the raw system_timecode - on iOS that is a Unix timestamp, i.e. ~498000 hours.)"""
     rs = h.props.get("recording_state") if h else None
     if rs is None:
         return "00:00:00:00"
-    tc = rs.recorded_duration if rs.is_recording and rs.HasField("recorded_duration") else rs.system_timecode
-    s = tc.seconds
-    return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}:{tc.frame_count:02d}"
+    fps = _playback_fps(h)
+    if recording(h):
+        return _fmt_tc(recording_elapsed(h), fps)
+    if rs.HasField("recorded_duration"):
+        d = rs.recorded_duration
+        return _fmt_tc(d.seconds + d.frame_count / fps, fps)
+    return "00:00:00:00"
 
 
 def battery_pct(h):

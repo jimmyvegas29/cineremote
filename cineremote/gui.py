@@ -158,6 +158,9 @@ class MainWindow(QMainWindow):
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._update_status)
         self._stats_timer.start(1000)
+        self._tc_timer = QTimer(self)            # the recording counter is computed here, not sent by the phone:
+        self._tc_timer.timeout.connect(self._tick_timecode)   # repaint it often enough for the frames field
+        self._tc_timer.start(100)
 
         self.updates = UpdateChecker(self)
         self.updates.result.connect(self._on_update_check)
@@ -343,6 +346,13 @@ class MainWindow(QMainWindow):
         elif kind == "error_event":
             et = pm.enum_name("ErrorEventType", m.error_type).replace("ERROR_EVENT_TYPE_", "").replace("_", " ").title()
             self.status.showMessage(f"{h.name if h else key}: camera error - {et}", 15000)
+
+    def _tick_timecode(self):
+        h = self.ctl.h
+        if h is not None and M.recording(h):
+            t = M.timecode(h)
+            self.studio.deck.tc.setText(t)
+            self.camera.tc.setText(t)
 
     def _update_status(self):
         parts = []

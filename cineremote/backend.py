@@ -43,6 +43,7 @@ class CamHandle:
         self.props = {}
         self.demo = None              # (photo, property overrides) for a --demo camera
         self.armed = False            # record-armed: "Record armed" rolls only these cameras
+        self.rec_started = None       # monotonic time we saw recording begin (fallback timecode clock)
 
 
 def _camera_key(service_name):
@@ -301,6 +302,11 @@ class Backend(QObject):
         self.sessionState.emit(h.key, st, detail)
 
     def _prop(self, h, field, value):
+        if field == "recording_state":
+            if value.is_recording and h.rec_started is None:
+                h.rec_started = time.monotonic()
+            elif not value.is_recording:
+                h.rec_started = None
         h.props[field] = value
         self.propertyChanged.emit(h.key, field, value)
 

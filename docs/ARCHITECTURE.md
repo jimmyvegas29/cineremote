@@ -102,11 +102,17 @@ Galaxy S24 Ultra, iPhone 16, iPad Pro).
    sends neither `current_value` nor a `PropertyChangedEvent`** (e.g. frame rate), so `session.write()`
    re-reads the property when the response has no value. iOS also reports frame-rate ranges as min/max
    only, so `model.Fps` offers the standard rates inside the range.
-7. **Disconnect** - `DisconnectEvent` → close data channel → close peer connection. Skipping it (crash,
+7. **Timecode** - `RecordingStateProperty` never carries a running count. While recording,
+   `system_timecode` = the wall-clock **start** of the take (Unix seconds + frame count; iOS also sends a
+   Unix time when idle) and the controller counts from it - exactly what Blackmagic's own controller does
+   (decompiled `appcam/d.java` `o()`/`p()`). Idle: `recorded_duration` = last clip length.
+   `model.recording_elapsed()` falls back to `CamHandle.rec_started` (when we saw recording begin) if the
+   start is missing or the clocks disagree; the GUI repaints the big timecode at 10 Hz while recording.
+8. **Disconnect** - `DisconnectEvent` → close data channel → close peer connection. Skipping it (crash,
    `kill -9`) wedges the phone's listener: it authorizes the next controller, then says `bye
    app_suspended` after ~20 s until the app is restarted. Hence the SIGTERM/SIGINT handler in `gui.main`
    and `aboutToQuit → backend.shutdown`.
-8. **One controller at a time.** A second controller makes the phone drop or wedge the first.
+9. **One controller at a time.** A second controller makes the phone drop or wedge the first.
 
 The `.proto` files are this project's own description of the protocol (field numbers match the app).
 `tools/gen_proto.py` compiles them into `proto/schema.pb` (a `FileDescriptorSet`), which

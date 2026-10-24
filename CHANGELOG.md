@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.3
+
+- Fixed the recording timecode. It stayed at 00:00:00:00 while recording (Pixel) or showed a huge number
+  like 498004:25:04:16 (iPhone): the phones send the wall-clock time a recording **started**, not a running
+  count. CineRemote now counts the take itself from that start (falling back to when it saw recording
+  begin), with the frames field ticking, and shows the last clip's length when idle.
+
 ## 1.1.2
 
 - **macOS disk image:** each release now has a `.dmg` for Apple Silicon and for Intel - open it and drag
