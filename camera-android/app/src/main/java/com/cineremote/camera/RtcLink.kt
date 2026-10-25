@@ -57,6 +57,8 @@ class RtcLink(context: Context, private val egl: EglBase, private val gain: () -
             // Raw camera mic, not the default VOICE_COMMUNICATION: no call processing, and a call-mode capture
             // takes priority over the recorder and level meter sharing the mic.
             .setAudioSource(android.media.MediaRecorder.AudioSource.CAMCORDER)
+            // both mics, like the recording (WebRTC captures mono by default; the controller's answer allows stereo Opus)
+            .setUseStereoInput(true)
             // the same Audio Gain as the recording, applied to the stream's PCM in place
             .setAudioRecordDataCallback { _, _, _, buf -> applyGain(buf) }
             .setUseHardwareAcousticEchoCanceler(false)
