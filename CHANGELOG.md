@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.8
+
+- **Fixed tick marks down the left edge of the picture.** Every camera's picture had small marks along its
+  left edge, from how video was scaled on PCs with many processor cores. The monitor, multiview, OBS output
+  and virtual webcam all scale cleanly now.
+- **The histogram shows colour.** It was drawing the blue channel three times, so it came out grey; red, green
+  and blue now show separately, like on the phone.
+- **Multiview:** the corner icon enlarges a camera inside the multiview, and the same icon takes you back to
+  the grid (it used to leave the multiview). Pictures have rounded corners matching the highlight, and the
+  readout sits straight on the picture with a soft shadow instead of a dark band.
+- **Audio:** the level sent to OBS is a slider instead of a dial (easier on a touchpad: click or drag
+  anywhere, scroll or arrow keys for 0.5 dB, double-click for 0 dB). Clicking the audio meter again closes
+  its popup.
+- **Camera cards:** the white badge shows the phone's whole slate name, with the phone's name under it.
+
 ## 1.1.7
 
 - **Audio meters show real stereo.** CineRemote now asks the phone for stereo audio. Without that, some
