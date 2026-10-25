@@ -1,5 +1,5 @@
 """Studio view (concept C): camera cards, monitor with PC-side tools, vertical audio meter, control deck."""
-from PySide6.QtCore import QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
@@ -189,9 +189,12 @@ class CameraCard(QWidget):
             p.setFont(T.ui_font(13.5, QFont.DemiBold))
             p.drawText(QRectF(12, y, nw, 20), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, nw))
             phone = ""
+        pw = int(r.width() - 24)
+        fmt = M.recording_format(h)
+        if fmt:     # recording format badge under the icons, the phone app's "4K / 16:9" laid out left to right
+            pw = int(self._format_badge(p, r.width() - 12, y + 24, *fmt) - 18)
         p.setPen(T.TEXT2)
         p.setFont(T.ui_font(11.5))
-        pw = int(r.width() - 24)
         p.drawText(QRectF(12, y + 22, pw, 18), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, pw))
         y += 46
         if not th_h:
@@ -215,6 +218,24 @@ class CameraCard(QWidget):
         if rt:
             p.setPen(T.TEXT2)
             p.drawText(QRectF(0, y, r.width() - 12, 15), Qt.AlignVCenter | Qt.AlignRight, f"{rt} · {gb:.0f} GB")
+
+    @staticmethod
+    def _format_badge(p, right, y, res, aspect):
+        """Outlined split pill "4K | 16:9", right-aligned at `right`; returns its left edge."""
+        f1, f2 = T.num_font(10.5, QFont.Bold), T.num_font(10.5, QFont.Medium)
+        w1, w2 = T.text_width(f1, res) + 12, T.text_width(f2, aspect) + 12
+        hh = 15                 # a little shorter than the icons above, with a 3 px gap under them
+        box = QRectF(right - w1 - w2, y, w1 + w2, hh)
+        T.rounded(p, box, 4, QColor(255, 255, 255, 10), QPen(QColor(255, 255, 255, 70), 1))
+        p.setPen(QPen(QColor(255, 255, 255, 50), 1))
+        p.drawLine(QPointF(box.left() + w1, box.top() + 3), QPointF(box.left() + w1, box.bottom() - 3))
+        p.setFont(f1)
+        p.setPen(T.TEXT)
+        p.drawText(QRectF(box.left(), y, w1, hh), Qt.AlignCenter, res)
+        p.setFont(f2)
+        p.setPen(T.TEXT2)
+        p.drawText(QRectF(box.left() + w1, y, w2, hh), Qt.AlignCenter, aspect)
+        return box.left()
 
     def _paint_compact(self, p, r, h):
         """Not connected: name on the first line, what to do on the second (never on one line - a long

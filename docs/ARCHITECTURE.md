@@ -160,7 +160,7 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
   range) and knows which session method sets it. Views only paint. `Controller.send_throttled` limits
   ruler drags to one command per method every 120 ms (newest wins).
 - **Studio view** (`ui/studio.py`): `CameraCard`s (live thumbnail, tally, battery/media, green record-arm ring,
-  multiview toggle, preview switch), monitor (`VideoView`), multiview grid (cameras whose card toggle is on;
+  multiview toggle, preview switch, recording-format badge from `M.recording_format`), monitor (`VideoView`), multiview grid (cameras whose card toggle is on;
   tile click = select, double-click = focus point, corner icon = enlarge in place / back to the grid via `MultiGrid.expanded`), vertical audio meter, control
   deck (`HudStrip`: all parameters in one bar, + record button; the open parameter shows a `ScrubRuler`, or a `ChipStrip` for <= `MAX_BUTTONS` (12) fixed
   choices; clicking the open tile closes the row and the deck shrinks to `Deck.SHORT`).

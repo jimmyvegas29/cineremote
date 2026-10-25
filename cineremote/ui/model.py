@@ -395,6 +395,23 @@ def slate_letter(h):
     return "•"
 
 
+_ASPECTS = [(16 / 9, "16:9"), (256 / 135, "17:9"), (4 / 3, "4:3"), (3 / 2, "3:2"), (2.39, "2.4:1"), (1.0, "1:1"),
+            (9 / 16, "9:16"), (3 / 4, "3:4")]
+
+
+def recording_format(h):
+    """("4K", "16:9") from the phone's recording format, like the badge in the Blackmagic app; None if unknown."""
+    rf = h.props.get("recording_format") if h else None
+    if rf is None or not rf.width or not rf.height:
+        return None
+    w, hh = max(rf.width, rf.height), min(rf.width, rf.height)      # name by the long side (portrait too)
+    res = ("8K" if w >= 7680 else "6K" if w >= 5760 else "4K DCI" if w >= 4096 else "4K" if w >= 3840 else
+           "2.7K" if w >= 2560 else "HD" if w >= 1920 else "720p" if w >= 1280 else f"{hh}p")
+    ratio = rf.width / rf.height
+    aspect = next((n for r, n in _ASPECTS if abs(ratio / r - 1) < 0.02), f"{ratio:.2f}:1")
+    return ("Open Gate" if rf.is_open_gate else res), aspect
+
+
 def slate_name(h):
     """The phone's whole slate/camera name ("FU", "Camera 2"), or "" if it has none."""
     if h and h.name.endswith(")") and " (" in h.name:
