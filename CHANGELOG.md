@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.9
+
+- **New control strip.** The camera settings at the bottom of the Studio view are one continuous bar, like
+  the readout on the phone, instead of separate boxes. Click a setting to adjust it; the open one glows with
+  an underline, and clicking it again closes it.
+- **Frame rate is buttons on Android too.** Blackmagic Camera on Android lists every whole frame rate, which
+  turned FPS into a ruler; it now offers the standard rates the phone supports (24, 25, 30, 48, 50, 60...).
+- Lens and frame-rate choices use the same bar style, the name of the open setting is bigger and centred,
+  and the compact record button sits centred with its timecode.
+
 ## 1.1.8
 
 - **Fixed tick marks down the left edge of the picture.** Every camera's picture had small marks along its

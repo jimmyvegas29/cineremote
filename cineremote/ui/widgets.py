@@ -201,62 +201,10 @@ class Segmented(QWidget):
             x += w
 
 
-# ---------------------------------------------------------------------------- parameter tile
-class ParamTile(QWidget):
-    """Blackmagic-style readout: small caps label (+ blue A when auto), big value, one context line."""
-    clicked = Signal(str)
-
-    def __init__(self, key, label, big=27, parent=None):
-        super().__init__(parent)
-        self.key, self.label = key, label
-        self.text, self.sub, self.auto = "—", "", None
-        self.selected = False
-        self.big = big
-        self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumSize(92, 96)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-    def set_state(self, st):
-        if (st.text, st.sub, st.auto) != (self.text, self.sub, self.auto):
-            self.text, self.sub, self.auto = st.text, st.sub, st.auto
-            self.update()
-
-    def set_selected(self, on):
-        if on != self.selected:
-            self.selected = on
-            self.update()
-
-    def mousePressEvent(self, e):
-        self.clicked.emit(self.key)
-
-    def paintEvent(self, e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        T.rounded(p, r, 10, T.SEL_BG if self.selected else T.BG2,
-                  QPen(QColor(47, 124, 246, 215) if self.selected else T.LINE, 1))
-        f = T.label_font(10.5 if self.width() > 100 else 10)
-        p.setFont(f)
-        p.setPen(QColor("#cfe0ff") if self.selected else T.TEXT2)
-        p.drawText(QRectF(12, 11, r.width() - 20, 14), Qt.AlignLeft | Qt.AlignVCenter, self.label)
-        if self.auto:
-            T.badge_a(p, 12 + T.text_width(f, self.label.upper()) + 6, 10.5, 14)
-        size = self.big
-        p.setFont(T.num_font(size))
-        while size > 16 and T.text_width(p.font(), self.text) > r.width() - 22:
-            size -= 1
-            p.setFont(T.num_font(size))
-        p.setPen(T.TEXT)
-        p.drawText(QRectF(12, 30, r.width() - 18, size + 8), Qt.AlignLeft | Qt.AlignVCenter, self.text)
-        p.setFont(T.ui_font(11))
-        p.setPen(QColor("#9fc3ff") if self.selected else T.TEXT3)
-        p.drawText(QRectF(12, r.height() - 24, r.width() - 18, 16), Qt.AlignLeft | Qt.AlignVCenter, self.sub)
-
-
 # ---------------------------------------------------------------------------- HUD strip
 class HudStrip(QWidget):
     """All parameters in one continuous bar, like the phone's top readout: label, big value, context line
-    per cell, thin dividers; the open one glows with an underline. cell(key) gives a ParamTile-like handle."""
+    per cell, thin dividers; the open one glows with an underline. cell(key) gives a per-parameter handle (set_state / set_selected / setEnabled)."""
     clicked = Signal(str)
 
     class _Cell:

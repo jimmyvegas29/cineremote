@@ -162,7 +162,7 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
 - **Studio view** (`ui/studio.py`): `CameraCard`s (live thumbnail, tally, battery/media, green record-arm ring,
   multiview toggle, preview switch), monitor (`VideoView`), multiview grid (cameras whose card toggle is on;
   tile click = select, double-click = focus point, corner icon = enlarge in place / back to the grid via `MultiGrid.expanded`), vertical audio meter, control
-  deck (`ParamTile`s + record button; the open tile shows a `ScrubRuler`, or a `ChipStrip` for <= `MAX_BUTTONS` (12) fixed
+  deck (`HudStrip`: all parameters in one bar, + record button; the open parameter shows a `ScrubRuler`, or a `ChipStrip` for <= `MAX_BUTTONS` (12) fixed
   choices; clicking the open tile closes the row and the deck shrinks to `Deck.SHORT`).
 - **Camera view** (`ui/camera_view.py`): the phone app's layout; overlay panels are `CachedPanel`s
   (re-rendered into a pixmap only when content changes, since they sit over 30 fps video).
