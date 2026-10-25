@@ -9,7 +9,7 @@ import time
 import numpy as np
 from av.video.reformatter import VideoReformatter
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from . import model as M
@@ -324,6 +324,10 @@ class VideoView(QWidget):
         p.fillRect(self.rect(), QColor("#050506") if self.mode != "camera" else QColor("black"))
         h = self.h
         r = QRectF(self.image_rect())
+        if self.mode == "tile":         # rounded picture, matching the tile's highlight border
+            clip = QPainterPath()
+            clip.addRoundedRect(r, 7, 7)
+            p.setClipPath(clip)
         if self._img is not None:
             p.drawImage(self._img_rect, self._img)
         else:
