@@ -83,10 +83,10 @@ class Analysis:
         if time.monotonic() - self._hist_t < 0.12:
             return
         self._hist_t = time.monotonic()
-        sub = bgra_u8[::4, ::16]                       # every 4th row, every 4th pixel
+        px = bgra_u8[::4].reshape(-1, bgra_u8.shape[1] // 4, 4)[:, ::4]   # every 4th row, every 4th pixel
         hist = {}
         for c, off in (("r", 2), ("g", 1), ("b", 0)):
-            h = np.bincount(sub[:, off::4].ravel() >> 2, minlength=64).astype(np.float32)
+            h = np.bincount(px[:, :, off].ravel() >> 2, minlength=64).astype(np.float32)
             h = np.sqrt(h)
             hist[c] = (h / (h.max() or 1)).tolist()
         self.hist = hist
