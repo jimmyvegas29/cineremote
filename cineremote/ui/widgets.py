@@ -253,6 +253,92 @@ class ParamTile(QWidget):
         p.drawText(QRectF(12, r.height() - 24, r.width() - 18, 16), Qt.AlignLeft | Qt.AlignVCenter, self.sub)
 
 
+# ---------------------------------------------------------------------------- HUD strip
+class HudStrip(QWidget):
+    """All parameters in one continuous bar, like the phone's top readout: label, big value, context line
+    per cell, thin dividers; the open one glows with an underline. cell(key) gives a ParamTile-like handle."""
+    clicked = Signal(str)
+
+    class _Cell:
+        def __init__(self, strip, key, label):
+            self.strip, self.key, self.label = strip, key, label
+            self.text, self.sub, self.auto, self.selected, self.enabled = "—", "", None, False, True
+
+        def set_state(self, st):
+            if (st.text, st.sub, st.auto) != (self.text, self.sub, self.auto):
+                self.text, self.sub, self.auto = st.text, st.sub, st.auto
+                self.strip.update()
+
+        def set_selected(self, on):
+            if on != self.selected:
+                self.selected = on
+                self.strip.update()
+
+        def setEnabled(self, on):
+            if on != self.enabled:
+                self.enabled = on
+                self.strip.update()
+
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.cells = [self._Cell(self, k, lab) for k, lab in items]
+        self.setFixedHeight(84)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Click a setting to adjust it · click again to close")
+
+    def cell(self, key):
+        return next(c for c in self.cells if c.key == key)
+
+    def _rect(self, i):
+        cw = (self.width() - 2) / len(self.cells)
+        return QRectF(1 + i * cw, 1, cw, self.height() - 2)
+
+    def mousePressEvent(self, e):
+        for i, c in enumerate(self.cells):
+            if self._rect(i).contains(e.position()):
+                self.clicked.emit(c.key)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        T.rounded(p, QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, QColor("#0b0c0e"), T.LINE)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 11, 11)
+        p.setClipPath(clip)
+        for i, c in enumerate(self.cells):
+            r = self._rect(i)
+            if c.selected:
+                g = QLinearGradient(0, r.top(), 0, r.bottom())
+                g.setColorAt(0, QColor(47, 124, 246, 0))
+                g.setColorAt(1, QColor(47, 124, 246, 60))
+                p.fillRect(r, g)
+                p.fillRect(QRectF(r.left() + 14, r.bottom() - 3, r.width() - 28, 3), T.ACCENT)
+            if i:
+                p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+                p.drawLine(QPointF(r.left(), r.top() + 16), QPointF(r.left(), r.bottom() - 16))
+            dim = not c.enabled
+            f = T.label_font(10 if r.width() > 100 else 9.5)
+            p.setFont(f)
+            p.setPen(T.ACCENT if c.selected else (T.TEXT3 if dim else T.TEXT2))
+            lw = T.text_width(f, c.label.upper()) + (20 if c.auto else 0)
+            lx = r.center().x() - lw / 2
+            p.drawText(QRectF(lx, r.top() + 9, lw, 14), Qt.AlignLeft | Qt.AlignVCenter, c.label)
+            if c.auto:
+                T.badge_a(p, lx + lw - 14, r.top() + 9, 14)
+            size = 26
+            p.setFont(T.num_font(size))
+            while size > 14 and T.text_width(p.font(), c.text) > r.width() - 12:
+                size -= 1
+                p.setFont(T.num_font(size))
+            p.setPen(T.TEXT3 if dim else (QColor("white") if c.selected else T.TEXT))
+            p.drawText(QRectF(r.left(), r.top() + 24, r.width(), 34), Qt.AlignCenter, c.text)
+            p.setFont(T.ui_font(10.5))
+            p.setPen(QColor("#9fc3ff") if c.selected else T.TEXT3)
+            p.drawText(QRectF(r.left() + 4, r.top() + 57, r.width() - 8, 15), Qt.AlignCenter,
+                       p.fontMetrics().elidedText(c.sub, Qt.ElideRight, int(r.width() - 8)))
+
+
 # ---------------------------------------------------------------------------- scrub ruler
 class ScrubRuler(QWidget):
     """Horizontal ruler under a fixed center marker, like the phone's dials. Drag, wheel or arrow keys

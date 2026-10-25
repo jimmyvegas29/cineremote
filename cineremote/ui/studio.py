@@ -9,7 +9,7 @@ from . import model as M
 from . import theme as T
 from .audio import gain_text
 from .video import ThumbSource, VideoView
-from .widgets import ArmButton, ChipStrip, GlyphToggle, ParamTile, RecordButton, ScrubRuler, Switch, VMeter
+from .widgets import ArmButton, ChipStrip, GlyphToggle, HudStrip, RecordButton, ScrubRuler, Switch, VMeter
 
 
 # ---------------------------------------------------------------------------- sidebar cards
@@ -429,7 +429,7 @@ class Deck(QWidget):
     """Parameter tiles + record cluster. Clicking a tile opens its control row above the tiles (a ruler, or
     one-click buttons for a short list of fixed values such as lenses); clicking it again closes the row
     and the deck shrinks so the picture gets the room. The open tile is remembered."""
-    TALL, SHORT = 214, 120
+    TALL, SHORT = 202, 108
 
     def __init__(self, win, parent=None):
         super().__init__(parent)
@@ -480,16 +480,10 @@ class Deck(QWidget):
         top.addWidget(self.chips, 1)
         top.addWidget(self.presets)
         left.addWidget(self.top_row)
-        tiles = QHBoxLayout()
-        tiles.setSpacing(8)
-        self.tiles = {}
-        for p in M.PARAMS:
-            t = ParamTile(p.key, p.label)
-            t.setToolTip("Click to adjust · click again to close")
-            t.clicked.connect(self.select)
-            tiles.addWidget(t)
-            self.tiles[p.key] = t
-        left.addLayout(tiles)
+        self.strip = HudStrip([(p.key, p.label) for p in M.PARAMS])
+        self.strip.clicked.connect(self.select)
+        left.addWidget(self.strip)
+        self.tiles = {p.key: self.strip.cell(p.key) for p in M.PARAMS}
         # record cluster: stacked when the deck is tall, side by side when it is short
         rec = QWidget()
         rec.setFixedWidth(206)
