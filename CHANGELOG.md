@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.10
+
+- **Recording format on each camera card:** a small badge shows what the phone is recording, like the one in
+  the Blackmagic app but left to right: 4K | 16:9, HD | 16:9, 4K DCI | 17:9, Open Gate...
+- **Full camera names:** the badge on the card, the monitor and the multiview shows the phone's whole camera
+  name, cut off with "…" when it's too long to fit.
+- CineRemote Camera (the Android app in the repository) keeps the whole camera name too (up to 32
+  characters) and streams stereo audio.
+
 ## 1.1.9
 
 - **New control strip.** The camera settings at the bottom of the Studio view are one continuous bar, like
