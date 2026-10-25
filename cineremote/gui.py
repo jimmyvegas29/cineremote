@@ -374,11 +374,10 @@ class MainWindow(QMainWindow):
         if not h or not h.session:
             return
         o = h.props.get("cam_orientation")
-        hello = h.session.hello
-        android = hello is not None and hello.app_info.platform == 2
-        if android and o is not None and o.orientation in (3, 4):
-            # Blackmagic Camera on Android takes the point a quarter-turn from its landscape picture, in both
-            # landscape directions (the stream stays upright either way up). Calibrated on a Pixel 10, app 3.5.
+        if o is not None and o.orientation in (3, 4):
+            # In landscape the app takes the point a quarter-turn from its picture, (1 - y, x), in both landscape
+            # directions (the stream stays upright either way up). Calibrated on Blackmagic Camera 3.5 on a
+            # Pixel 10 (normal + flipped landscape) and an iPhone 16 (landscape).
             px, py = 1.0 - y, x
         # the phone's point-of-interest space is sensor (landscape) oriented
         elif o is None or o.orientation == 1:
