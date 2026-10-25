@@ -384,8 +384,6 @@ class MainWindow(QMainWindow):
             px, py = y, 1.0 - x
         elif o.orientation == 2:
             px, py = 1.0 - y, x
-        elif o.orientation == 4:
-            px, py = 1.0 - x, 1.0 - y
         else:
             px, py = x, y
         self.ctl.send("tap_focus", px, py)
