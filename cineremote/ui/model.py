@@ -18,6 +18,7 @@ ISO_STOPS = [25, 32, 40, 50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640
              2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800]
 STAB_NAMES = {1: "Off", 2: "Standard", 3: "Cinematic", 4: "Extreme", 5: "Optical"}
 LENS_KIND = {1: "Ultra wide", 2: "Wide", 3: "Tele", 4: "Front", 5: "Ultra wide", 6: "Tele", 7: "Front wide"}
+MAX_BUTTONS = 12      # a setting with up to this many fixed values gets buttons instead of a ruler
 WB_PRESETS = [("Daylight", 5600), ("Cloudy", 6500), ("Tungsten", 3200), ("Fluorescent", 4500)]
 
 
@@ -127,7 +128,12 @@ class Fps(Param):
             lo = rng.frame_rate_min.num / max(rng.frame_rate_min.den, 1)
             hi = rng.frame_rate_max.num / max(rng.frame_rate_max.den, 1)
             vals = [v for v in STD_FPS if lo <= v[0] / v[1] <= hi + 1e-6]
-        st.choices =[(v, _fps_label(*v)) for v in (vals or [(24, 1), (25, 1), (30, 1), (60, 1)])]
+        if len(vals) > 9:
+            # Android lists every whole rate in its range (1, 2, ... 60): offer the standard project rates it
+            # supports, so FPS stays a row of buttons instead of a ruler of rates nobody shoots at
+            have = {v[0] / v[1] for v in vals}
+            vals = [v for v in STD_FPS if any(abs(v[0] / v[1] - f) < 0.01 for f in have)] or vals
+        st.choices = [(v, _fps_label(*v)) for v in (vals or [(24, 1), (25, 1), (30, 1), (60, 1)])]
         if fr and fr.playback_frame_rate.num:
             f = fr.playback_frame_rate
             st.value = (f.num, max(f.den, 1))

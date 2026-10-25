@@ -195,14 +195,14 @@ class PickerPopover(Popover):
         self.chips.set_items(self._quick(p, st), st.value)
         self.ruler.set_state(st, p.fmt, key=(self.ctl.key, p.key))
         self.ruler.setEnabled(self.ctl.live() and st.enabled and st.value is not None and (st.discrete or st.hi > st.lo))
-        self.ruler.setVisible(not (st.discrete and len(st.choices) <= 9))
+        self.ruler.setVisible(not (st.discrete and len(st.choices) <= M.MAX_BUTTONS))
         self.hint.setVisible(self.ruler.isVisible())
         self.adjustSize()
 
     @staticmethod
     def _quick(p, st):
         if st.discrete:
-            if len(st.choices) <= 9:
+            if len(st.choices) <= M.MAX_BUTTONS:
                 return st.choices
             keys = [c[0] for c in st.choices]
             i = keys.index(st.value) if st.value in keys else len(keys) // 2

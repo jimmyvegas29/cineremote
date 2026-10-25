@@ -581,7 +581,7 @@ class Deck(QWidget):
             st = p.state(h) if h else M.State()
             self.r_label.setText(p.label.upper())
             # a short list of fixed values (lenses, frame rates) is a row of buttons, not a ruler
-            buttons = st.discrete and len(st.choices) <= 9
+            buttons = st.discrete and len(st.choices) <= M.MAX_BUTTONS
             self.chips.setVisible(buttons)
             self.ruler.setVisible(not buttons)
             if buttons:
