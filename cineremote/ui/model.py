@@ -92,6 +92,10 @@ class Lens(Param):
             for c in cams.cameras:
                 if not (c.is_disabled or c.lens.is_unavailable):
                     st.choices.append((c.id, self._label(c)))
+            # widest to longest, then the front cameras, then Auto (the phone's own order is arbitrary)
+            kind = {c.id: (c.id == "LensAuto", c.lens.type in (4, 7), c.lens.optical_zoom_factor or 99)
+                    for c in cams.cameras}
+            st.choices.sort(key=lambda ch: kind[ch[0]])
         if ac:
             cur = "LensAuto" if ac.is_auto else ac.camera_id
             st.value = cur

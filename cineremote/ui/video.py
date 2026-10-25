@@ -118,6 +118,7 @@ class VideoView(QWidget):
     tapped = Signal(float, float)
     clicked = Signal(str)
     doubleClicked = Signal(str)
+    expandRequested = Signal(str)       # tile: the expand icon in its corner
 
     def __init__(self, backend, key=None, mode="studio", parent=None):
         super().__init__(parent)
@@ -140,6 +141,8 @@ class VideoView(QWidget):
         self.setMouseTracking(False)
         if mode == "studio":
             self._make_toggles()
+        elif mode == "tile":
+            self.setToolTip("Click to select · double-click to set the focus point · corner icon to open")
         # Frames are pushed: the backend signals each new frame, so nothing waits on a poll interval.
         # The slow timer only covers "no video" states and the fading focus reticle.
         backend.frameReady.connect(self._on_frame)
@@ -282,19 +285,35 @@ class VideoView(QWidget):
         return self._img_rect if self._img is not None else self.rect()
 
     # ------------------------------------------------------------------ input
+    def _expand_rect(self):
+        r = QRectF(self.image_rect())
+        return QRectF(r.right() - 36, r.top() + 8, 26, 26)
+
+    def _tap(self, pos):
+        """Focus/exposure point at a click inside the picture (normalized to the picture)."""
+        if self._img is None or not self._img_rect.contains(pos.toPoint()):
+            return
+        x = (pos.x() - self._img_rect.left()) / self._img_rect.width()
+        y = (pos.y() - self._img_rect.top()) / self._img_rect.height()
+        self._reticle = (x, y, time.monotonic())
+        self.tapped.emit(x, y)
+        self.update()
+
     def mousePressEvent(self, e):
+        if self.mode == "tile" and self.key and self._expand_rect().contains(e.position()):
+            self.expandRequested.emit(self.key)
+            return
         if self.key:
             self.clicked.emit(self.key)
-        if self.mode != "tile" and self._img is not None and self._img_rect.contains(e.position().toPoint()):
-            x = (e.position().x() - self._img_rect.left()) / self._img_rect.width()
-            y = (e.position().y() - self._img_rect.top()) / self._img_rect.height()
-            self._reticle = (x, y, time.monotonic())
-            self.tapped.emit(x, y)
-            self.update()
+        if self.mode != "tile":         # in the multiview a click selects; double-click sets the focus point
+            self._tap(e.position())
         super().mousePressEvent(e)
 
     def mouseDoubleClickEvent(self, e):
-        if self.key:
+        if self.mode == "tile":
+            if not self._expand_rect().contains(e.position()):
+                self._tap(e.position())
+        elif self.key:
             self.doubleClicked.emit(self.key)
 
     # ------------------------------------------------------------------ paint
@@ -354,7 +373,8 @@ class VideoView(QWidget):
             self._reticle = None
             return
         alpha = 255 if age < 1.8 else int(255 * (2.5 - age) / 0.7)
-        cx, cy, s, k = r.left() + x * r.width(), r.top() + y * r.height(), 46.0, 14.0
+        s, k = (28.0, 9.0) if self.mode == "tile" else (46.0, 14.0)
+        cx, cy = r.left() + x * r.width(), r.top() + y * r.height()
         p.setPen(QPen(QColor(255, 212, 59, alpha), 2.5))
         for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
             ox, oy = cx + dx * s, cy + dy * s
@@ -405,7 +425,12 @@ class VideoView(QWidget):
         x, y = r.left() + 10, r.top() + 10
         T.slate_badge(p, x, y, M.slate_letter(h), 22)
         T.chip(p, x + 28, y, M.short_name(h), h=22, font=T.ui_font(11.5, QFont.DemiBold))
-        right = r.right() - 10
+        ex = self._expand_rect()
+        T.rounded(p, ex, 6, QColor(0, 0, 0, 90), QColor(255, 255, 255, 40))
+        p.setPen(QColor(255, 255, 255, 170))
+        p.setFont(T.icon_font(13))
+        p.drawText(ex, Qt.AlignCenter, T.IC_FULLSCREEN)
+        right = ex.left() - 6
         b = M.battery_pct(h)
         if b is not None:
             t = f"{b:.0f}%"

@@ -95,8 +95,39 @@ class IconButton(QAbstractButton):
             self.setFixedSize(34 + (T.text_width(T.ui_font(13, QFont.DemiBold), text) + 10 if text else 0), 34)
 
 
+class GlyphToggle(QAbstractButton):
+    """Small on/off icon for a camera card (e.g. "show in multiview"): blue when on, grey when off."""
+
+    def __init__(self, glyph, parent=None):
+        super().__init__(parent)
+        self.glyph = glyph
+        self.setCheckable(True)
+        self.setFixedSize(22, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        on = self.isChecked()
+        if on or self._hover:
+            T.rounded(p, QRectF(self.rect()), 5, T.ACCENT_SOFT if on else QColor(255, 255, 255, 14))
+        p.setPen(T.ACCENT if on else (T.TEXT2 if self._hover else T.TEXT3))
+        p.setFont(T.icon_font(13))
+        p.drawText(QRectF(self.rect()), Qt.AlignCenter, self.glyph)
+
+
 class ArmButton(QAbstractButton):
-    """Record-arm toggle for a camera card: a ring that fills red when armed."""
+    """Record-arm toggle for a camera card: a ring that fills green when armed (green, not red: armed is
+    not recording - the card's tally and REC chip say that)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,12 +149,12 @@ class ArmButton(QAbstractButton):
         p.setRenderHint(QPainter.Antialiasing)
         c = QRectF(self.rect()).center()
         on = self.isChecked()
-        ring = T.REC if on else (T.TEXT2 if self._hover else T.TEXT3)
+        ring = T.OK if on else (T.TEXT2 if self._hover else T.TEXT3)
         p.setPen(QPen(ring, 1.6))
-        p.setBrush(QColor(229, 50, 45, 45) if on else Qt.NoBrush)
+        p.setBrush(QColor(T.OK.red(), T.OK.green(), T.OK.blue(), 45) if on else Qt.NoBrush)
         p.drawEllipse(c, 9, 9)
         p.setPen(Qt.NoPen)
-        p.setBrush(T.REC if on else (QColor(229, 50, 45, 140) if self._hover else T.TEXT3))
+        p.setBrush(T.OK if on else (QColor(T.OK.red(), T.OK.green(), T.OK.blue(), 140) if self._hover else T.TEXT3))
         p.drawEllipse(c, 4.5, 4.5)
 
 
@@ -349,9 +380,12 @@ class ScrubRuler(QWidget):
     def mouseReleaseEvent(self, e):
         if self._drag is None or e.button() != Qt.LeftButton:
             return
-        start = self._drag[3]
+        x0, start = self._drag[0], self._drag[3]
         self._drag = None
         if self.choices:
+            if abs(e.position().x() - x0) < 4:      # a click on a value jumps to it
+                self.pos = self.pos + (e.position().x() - self.width() / 2) / self._px_per_unit()
+                self._clamp()
             self.pos = float(round(self.pos))
         self._hold_until = time.monotonic() + 0.6
         self.update()
@@ -398,11 +432,7 @@ class ScrubRuler(QWidget):
                 p.drawLine(QPointF(x, h - 18), QPointF(x, h))
                 p.setPen(T.TEXT3 if dim else T.TEXT2)
                 p.drawText(QRectF(x - 40, 6, 80, 18), Qt.AlignCenter, self.choices[i][1])
-                if i < len(self.choices) - 1:
-                    p.setPen(QPen(tick, 1))
-                    for k in (1, 2, 3):
-                        xx = x + k * ppu / 4
-                        p.drawLine(QPointF(xx, h - 9), QPointF(xx, h))
+                # one tick per value: no in-between ticks for values that don't exist (ISO 500 -> 640)
         else:
             span_px = r.width()
             units = span_px / ppu
@@ -468,8 +498,10 @@ class ChipStrip(QWidget):
         self.setCursor(Qt.PointingHandCursor)
 
     def set_items(self, items, current):
-        self.items, self.current = list(items), current
-        self.update()
+        items = list(items)
+        if (items, current) != (self.items, self.current):
+            self.items, self.current = items, current
+            self.update()
 
     def _rects(self):
         n = max(len(self.items), 1)
@@ -488,6 +520,8 @@ class ChipStrip(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setFont(T.num_font(self.font_px))
+        if not self.isEnabled():
+            p.setOpacity(0.45)
         for (v, label), r in zip(self.items, self._rects()):
             on = v == self.current
             T.rounded(p, r, 7, T.ACCENT if on else QColor(255, 255, 255, 16))

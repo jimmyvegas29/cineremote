@@ -9,16 +9,18 @@ from . import model as M
 from . import theme as T
 from .audio import gain_text
 from .video import ThumbSource, VideoView
-from .widgets import ArmButton, ParamTile, RecordButton, ScrubRuler, Switch, VMeter
+from .widgets import ArmButton, ChipStrip, GlyphToggle, ParamTile, RecordButton, ScrubRuler, Switch, VMeter
 
 
 # ---------------------------------------------------------------------------- sidebar cards
 class CameraCard(QWidget):
     """One camera in the sidebar. The blue ring marks the selected camera; the Live switch turns the
     card's moving thumbnail off (saved per camera) for people who don't want motion in two places.
-    The red ring arms the camera for recording, so Record armed rolls a chosen group (also saved)."""
+    The green ring arms the camera for recording, so Record armed rolls a chosen group, and the grid icon
+    puts the camera in the multiview (both saved too)."""
     clicked = Signal(str)
     armChanged = Signal(str, bool)
+    multiviewChanged = Signal(str, bool)
     doubleClicked = Signal(str)
     menuRequested = Signal(str, object)
     PAD = 10
@@ -45,6 +47,10 @@ class CameraCard(QWidget):
         if self.h is not None:
             self.h.armed = self.arm.isChecked()
         self.arm.toggled.connect(self._toggle_arm)
+        self.mv = GlyphToggle(T.IC_MULTI, self)
+        self.mv.setToolTip("Show this camera in the multiview")
+        self.mv.setChecked(str(self.settings.value(f"cards/{key}/multiview", "true")).lower() == "true")
+        self.mv.toggled.connect(self._toggle_mv)
 
     @property
     def h(self):
@@ -67,6 +73,10 @@ class CameraCard(QWidget):
         self.armChanged.emit(self.key, on)
         self.update()
 
+    def _toggle_mv(self, on):
+        self.settings.setValue(f"cards/{self.key}/multiview", on)
+        self.multiviewChanged.emit(self.key, on)
+
     # -- layout (shared by sizeHint, paint and the switch position)
     def _thumb_h(self, w):
         if self.compact() or not self.live_preview:
@@ -80,8 +90,8 @@ class CameraCard(QWidget):
         if self.compact():
             return 60
         th = self._thumb_h(w)
-        # name row + battery row (+ thumbnail, or + status chip row when the thumbnail is off)
-        return int(th + 74) if th else 92
+        # name + phone rows, battery row (+ thumbnail, or + status chip row when the thumbnail is off)
+        return int(th + 92) if th else 110
 
     def sizeHint(self):
         return QSize(250, self.heightForWidth(max(self.width(), 250)))
@@ -96,12 +106,13 @@ class CameraCard(QWidget):
 
     def _place_switch(self):
         show = not self.compact()
-        self.sw.setVisible(show)
-        self.arm.setVisible(show)
+        for w in (self.sw, self.arm, self.mv):
+            w.setVisible(show)
         if show:
             y = int(self._name_y())
             self.sw.move(self.width() - 12 - self.sw.width(), y + 2)
             self.arm.move(self.sw.x() - 8 - self.arm.width(), y - 1)
+            self.mv.move(self.arm.x() - 6 - self.mv.width(), y - 1)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.RightButton:
@@ -166,13 +177,20 @@ class CameraCard(QWidget):
             p.fillRect(QRectF(r.left(), r.top(), 4, r.height()), tally)
             p.restore()
         y = self._name_y()
-        T.slate_badge(p, 12, y, M.slate_letter(h), 20)
+        letter = M.slate_letter(h)
+        T.slate_badge(p, 12, y, letter, 20)
+        # camera (slate) name, and the phone under it
+        title, phone = (f"Camera {letter}", M.short_name(h)) if letter != "•" else (M.short_name(h), "")
         p.setPen(T.TEXT)
         p.setFont(T.ui_font(13.5, QFont.DemiBold))
-        name_right = self.arm.x() - 6 if self.arm.isVisible() else r.width() - 12
-        p.drawText(QRectF(39, y, max(20, name_right - 39), 20), Qt.AlignVCenter,
-                   p.fontMetrics().elidedText(M.short_name(h), Qt.ElideRight, int(max(20, name_right - 39))))
-        y += 28
+        name_right = self.mv.x() - 6 if self.mv.isVisible() else r.width() - 12
+        nw = int(max(20, name_right - 39))
+        p.drawText(QRectF(39, y, nw, 20), Qt.AlignVCenter, p.fontMetrics().elidedText(title, Qt.ElideRight, nw))
+        p.setPen(T.TEXT2)
+        p.setFont(T.ui_font(11.5))
+        pw = int(r.width() - 51)
+        p.drawText(QRectF(39, y + 20, pw, 18), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, pw))
+        y += 46
         if not th_h:
             wchip = T.chip(p, 12, y, status, font=cf, h=21, fill=T.REC if rec else QColor(255, 255, 255, 10),
                            border=None if rec else T.LINE2, dot=None if rec else tally)
@@ -297,12 +315,17 @@ class Sidebar(QWidget):
                 c.doubleClicked.connect(self.win.toggle_connect)
                 c.menuRequested.connect(self.win.camera_menu)
                 c.armChanged.connect(lambda *_: self.win.update_record_button())
+                c.multiviewChanged.connect(lambda *_: self.win.refresh_multiview())
             self.list.removeWidget(c)
             self.list.insertWidget(i, c)
         live = sum(1 for _, h in items if h.session)
         self.count.setText(f"{live} live" if live else (f"{len(items)} found" if items else ""))
         self.empty.setVisible(not items)
         self.set_current(self.win.current)
+
+    def in_multiview(self, key):
+        c = self.cards.get(key)
+        return c is None or c.mv.isChecked()
 
     def set_current(self, key):
         for k, c in self.cards.items():
@@ -344,8 +367,13 @@ class MultiGrid(QWidget):
         self.grid.setContentsMargins(12, 12, 12, 12)
         self.grid.setSpacing(10)
         self.tiles = []
+        self.empty = QLabel("No cameras in the multiview.\nTurn on the grid icon on a camera card.")
+        self.empty.setAlignment(Qt.AlignCenter)
+        self.empty.setStyleSheet(f"color: {T.TEXT3.name()}; font-size: 13px;")
+        self.grid.addWidget(self.empty, 0, 0)
 
     def rebuild(self, keys):
+        self.empty.setVisible(not keys)
         if [t.key for t in self.tiles] == list(keys):
             self.set_current(self.win.current)
             return
@@ -358,10 +386,16 @@ class MultiGrid(QWidget):
         for i, k in enumerate(keys):
             t = VideoView(self.win.backend, k, mode="tile")
             t.clicked.connect(self.win.select_key)
-            t.doubleClicked.connect(self.win.open_single)
+            t.expandRequested.connect(self.win.open_single)
+            t.tapped.connect(lambda x, y, k=k: self._focus(k, x, y))
             self.grid.addWidget(t, i // cols, i % cols)
             self.tiles.append(t)
         self.set_current(self.win.current)
+
+    def _focus(self, key, x, y):
+        if self.win.current != key:
+            self.win.select_key(key)
+        self.win.tap_focus(x, y)
 
     def set_current(self, key):
         for t in self.tiles:
@@ -371,18 +405,26 @@ class MultiGrid(QWidget):
 
 # ---------------------------------------------------------------------------- control deck
 class Deck(QWidget):
+    """Parameter tiles + record cluster. Clicking a tile opens its control row above the tiles (a ruler, or
+    one-click buttons for a short list of fixed values such as lenses); clicking it again closes the row
+    and the deck shrinks so the picture gets the room. The open tile is remembered."""
+    TALL, SHORT = 214, 120
+
     def __init__(self, win, parent=None):
         super().__init__(parent)
         self.win, self.ctl = win, win.ctl
-        self.sel = "iso"
-        self.setFixedHeight(214)
+        self.settings = QSettings("CineRemote", "CineRemote")
+        saved = self.settings.value("deck/selected", "iso")
+        self.sel = saved if saved in M.BY_KEY else None
         outer = QHBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
         outer.setSpacing(12)
         left = QVBoxLayout()
         left.setSpacing(12)
         outer.addLayout(left, 1)
-        top = QHBoxLayout()
+        self.top_row = QWidget()
+        top = QHBoxLayout(self.top_row)
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(10)
         self.r_label = QLabel("ISO")
         self.r_label.setFont(T.label_font(11))
@@ -396,6 +438,8 @@ class Deck(QWidget):
         self.ruler.setToolTip("Drag, scroll or use ← → to change the value")
         self.ruler.changing.connect(lambda v: self._ruler(v, False))
         self.ruler.committed.connect(lambda v: self._ruler(v, True))
+        self.chips = ChipStrip(height=44, font_px=16)
+        self.chips.picked.connect(lambda v: self._ruler(v, True))
         self.presets = QWidget()
         pl = QHBoxLayout(self.presets)
         pl.setContentsMargins(0, 0, 0, 0)
@@ -411,48 +455,79 @@ class Deck(QWidget):
         top.addWidget(self.r_auto_lbl)
         top.addWidget(self.r_auto)
         top.addWidget(self.ruler, 1)
+        top.addWidget(self.chips, 1)
         top.addWidget(self.presets)
-        left.addLayout(top)
+        left.addWidget(self.top_row)
         tiles = QHBoxLayout()
         tiles.setSpacing(8)
         self.tiles = {}
         for p in M.PARAMS:
             t = ParamTile(p.key, p.label)
+            t.setToolTip("Click to adjust · click again to close")
             t.clicked.connect(self.select)
             tiles.addWidget(t)
             self.tiles[p.key] = t
         left.addLayout(tiles)
-        # record cluster
+        # record cluster: stacked when the deck is tall, side by side when it is short
         rec = QWidget()
         rec.setFixedWidth(206)
         rec.setObjectName("recbox")
         rec.setStyleSheet(f"QWidget#recbox {{ background: {T.BG2.name()}; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; }}")
-        rl = QVBoxLayout(rec)
-        rl.setContentsMargins(8, 10, 8, 10)
-        rl.setSpacing(6)
+        self.rec_grid = QGridLayout(rec)
+        self.rec_grid.setContentsMargins(8, 8, 8, 8)
+        self.rec_grid.setSpacing(6)
         self.tc = QLabel("00:00:00:00")
-        self.tc.setFont(T.num_font(24))
-        self.tc.setAlignment(Qt.AlignCenter)
         self.rec_btn = RecordButton(76)
         self.rec_btn.clicked.connect(self._rec)
         self.media = QLabel("")
-        self.media.setAlignment(Qt.AlignCenter)
-        self.media.setFont(T.num_font(12, QFont.Medium))
         self.media.setStyleSheet(f"color: {T.TEXT2.name()};")
-        rl.addWidget(self.tc)
-        rl.addWidget(self.rec_btn, 0, Qt.AlignHCenter)
-        rl.addWidget(self.media)
         outer.addWidget(rec)
-        self.select("iso")
+        self._apply_open()
 
     def select(self, key):
-        self.sel = key
+        """Open a tile's controls; clicking the open tile again closes them."""
+        self.sel = None if key == self.sel else key
+        self.settings.setValue("deck/selected", self.sel or "")
+        self._apply_open()
+        if self.sel:
+            self.ruler.setFocus()
+
+    def _apply_open(self):
+        open_ = self.sel is not None
         for k, t in self.tiles.items():
-            t.set_selected(k == key)
+            t.set_selected(k == self.sel)
+        self.top_row.setVisible(open_)
+        self.setFixedHeight(self.TALL if open_ else self.SHORT)
+        g = self.rec_grid
+        for w in (self.tc, self.rec_btn, self.media):
+            g.removeWidget(w)
+        for i in range(3):
+            g.setRowStretch(i, 0)
+            g.setColumnStretch(i, 0)
+        if open_:
+            self.rec_btn.setFixedSize(76, 76)
+            self.tc.setFont(T.num_font(24))
+            self.media.setFont(T.num_font(12, QFont.Medium))
+            self.tc.setAlignment(Qt.AlignCenter)
+            self.media.setAlignment(Qt.AlignCenter)
+            g.addWidget(self.tc, 0, 0)
+            g.addWidget(self.rec_btn, 1, 0, Qt.AlignHCenter)
+            g.addWidget(self.media, 2, 0)
+        else:
+            self.rec_btn.setFixedSize(60, 60)
+            self.tc.setFont(T.num_font(17))
+            self.media.setFont(T.num_font(11, QFont.Medium))
+            self.tc.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+            self.media.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            g.addWidget(self.rec_btn, 0, 0, 2, 1, Qt.AlignCenter)
+            g.addWidget(self.tc, 0, 1)
+            g.addWidget(self.media, 1, 1)
+            g.setColumnStretch(1, 1)
         self.refresh()
-        self.ruler.setFocus()
 
     def _ruler(self, v, final):
+        if self.sel is None:
+            return
         p = M.BY_KEY[self.sel]
         st = p.state(self.ctl.h) if self.ctl.h else None
         # Lens / FPS switch hardware: only on release, never once per item passed while dragging.
@@ -466,7 +541,8 @@ class Deck(QWidget):
             self.tiles[self.sel].set_state(st)
 
     def _auto_toggled(self, on):
-        self.ctl.set_auto(M.BY_KEY[self.sel], on)
+        if self.sel is not None:
+            self.ctl.set_auto(M.BY_KEY[self.sel], on)
 
     def _rec(self, checked):
         self.rec_btn.setChecked(not checked)     # wait for the phone to confirm
@@ -479,18 +555,27 @@ class Deck(QWidget):
             st = p.state(h) if h else M.State()
             self.tiles[p.key].set_state(st)
             self.tiles[p.key].setEnabled(live)
-        p = M.BY_KEY[self.sel]
-        st = p.state(h) if h else M.State()
-        self.r_label.setText(p.label.upper())
-        self.ruler.set_state(st, p.fmt, key=(self.ctl.key, p.key))
-        self.ruler.setEnabled(live and st.enabled and st.value is not None and (st.discrete or st.hi > st.lo))
-        self.r_auto.setVisible(p.has_auto)
-        self.r_auto_lbl.setVisible(p.has_auto)
-        self.r_auto.blockSignals(True)
-        self.r_auto.setChecked(bool(st.auto))
-        self.r_auto.blockSignals(False)
-        self.r_auto.setEnabled(live)
-        self.presets.setVisible(p.key == "wb")
+        if self.sel is not None:
+            p = M.BY_KEY[self.sel]
+            st = p.state(h) if h else M.State()
+            self.r_label.setText(p.label.upper())
+            # a short list of fixed values (lenses, frame rates) is a row of buttons, not a ruler
+            buttons = st.discrete and len(st.choices) <= 9
+            self.chips.setVisible(buttons)
+            self.ruler.setVisible(not buttons)
+            if buttons:
+                self.chips.set_items(st.choices, st.value)
+                self.chips.setEnabled(live and st.enabled)
+            else:
+                self.ruler.set_state(st, p.fmt, key=(self.ctl.key, p.key))
+                self.ruler.setEnabled(live and st.enabled and st.value is not None and (st.discrete or st.hi > st.lo))
+            self.r_auto.setVisible(p.has_auto)
+            self.r_auto_lbl.setVisible(p.has_auto)
+            self.r_auto.blockSignals(True)
+            self.r_auto.setChecked(bool(st.auto))
+            self.r_auto.blockSignals(False)
+            self.r_auto.setEnabled(live)
+            self.presets.setVisible(p.key == "wb")
         self.tc.setText(M.timecode(h))
         rec = M.recording(h)
         self.tc.setStyleSheet(f"color: {T.REC.name() if rec else T.TEXT.name()};")

@@ -132,11 +132,14 @@ Do this once on every phone:
 1. Start CineRemote. Phones on the network appear on the left within a few seconds. A phone that doesn't
    show up can be added with **Add camera** and its IP address.
 2. **Double-click a phone** to connect and enter its Remote Camera password (CineRemote can remember it).
-3. Click a setting tile (ISO, shutter, WB…) and then drag, scroll or use ← → on the ruler above it. **Auto**
-   hands that setting back to the phone.
-4. Click anywhere on the picture to set the focus and exposure point.
+3. Click a setting tile (ISO, shutter, WB…) and then drag, scroll or use ← → on the ruler above it, or click a
+   value on it. Settings with a few fixed values (lens, frame rate) show buttons instead. **Auto** hands that
+   setting back to the phone. Click the tile again to close it and give the picture more room.
+4. Click anywhere on the picture to set the focus and exposure point (in the multiview: double-click a camera's
+   picture; its corner icon opens that camera on its own).
+   The grid icon on a camera card chooses whether that camera appears in the multiview.
 5. Press the big record button to record on the selected phone, or **Record all** to roll every camera together.
-   To roll only some of them, click the **red ring** on those cameras' cards to arm them: the top button
+   To roll only some of them, click the **ring** on those cameras' cards to arm them (it turns green): the top button
    becomes **Record armed (n)** and starts just the armed cameras. **Stop all** stops everything.
 
 The phone records at its own quality to its own storage. CineRemote shows a live preview stream, and that
@@ -150,7 +153,9 @@ preview is what goes to OBS and the virtual webcam.
 | <kbd>←</kbd> <kbd>→</kbd> / mouse wheel | Step the selected setting |
 | Double-click a camera | Connect / disconnect |
 | Right-click a camera | Identify (flashes the phone), forget password, remove |
-| Red ring on a card | Arm / disarm the camera for **Record armed** |
+| Ring on a card | Arm / disarm the camera for **Record armed** (green = armed) |
+| Grid icon on a card | Show / hide the camera in the multiview |
+| Double-click a multiview picture | Set that camera's focus and exposure point |
 
 ## OBS Studio
 

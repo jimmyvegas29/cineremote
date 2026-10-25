@@ -184,7 +184,11 @@ class MainWindow(QMainWindow):
         self._refresh_views()
 
     def set_multiview(self, on):
-        self.studio.set_multiview(on, self._live_keys())
+        self.studio.set_multiview(on, self._multiview_keys())
+
+    def refresh_multiview(self):
+        if self.top.multi.isChecked():
+            self.studio.multi.rebuild(self._multiview_keys())
 
     def open_single(self, key):
         self.select_key(key)
@@ -196,6 +200,10 @@ class MainWindow(QMainWindow):
 
     def _live_keys(self):
         return [k for k, h in self._visible_cams() if h.session or h.want_connected]
+
+    def _multiview_keys(self):
+        """Live cameras whose card has the multiview (grid) icon on."""
+        return [k for k in self._live_keys() if self.studio.sidebar.in_multiview(k)]
 
     # ------------------------------------------------------------------ camera list
     def _visible_cams(self):
@@ -222,8 +230,7 @@ class MainWindow(QMainWindow):
         self.studio.sidebar.rebuild(items)
         self.update_record_button()
         self.camera.set_keys([k for k, _ in items])
-        if self.top.multi.isChecked():
-            self.studio.multi.rebuild(self._live_keys())
+        self.refresh_multiview()
         if self.current is None and items:
             self.select_key(items[0][0])
 

@@ -155,9 +155,11 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
   EV, focus, zoom). Each turns `CamHandle.props` into a `State` (text, sub-line, auto, value, choices or
   range) and knows which session method sets it. Views only paint. `Controller.send_throttled` limits
   ruler drags to one command per method every 120 ms (newest wins).
-- **Studio view** (`ui/studio.py`): `CameraCard`s (live thumbnail, tally, battery/media, record-arm ring,
-  preview switch), monitor (`VideoView`), multiview grid, vertical audio meter, control deck
-  (`ParamTile`s + `ScrubRuler` + record button).
+- **Studio view** (`ui/studio.py`): `CameraCard`s (live thumbnail, tally, battery/media, green record-arm ring,
+  multiview toggle, preview switch), monitor (`VideoView`), multiview grid (cameras whose card toggle is on;
+  tile click = select, double-click = focus point, corner icon = open single), vertical audio meter, control
+  deck (`ParamTile`s + record button; the open tile shows a `ScrubRuler`, or a `ChipStrip` for <= 9 fixed
+  choices; clicking the open tile closes the row and the deck shrinks to `Deck.SHORT`).
 - **Camera view** (`ui/camera_view.py`): the phone app's layout; overlay panels are `CachedPanel`s
   (re-rendered into a pixmap only when content changes, since they sit over 30 fps video).
 - **VideoView** (`ui/video.py`): frames arrive via `frameReady` (no polling); `bgra` reformat at display
@@ -201,7 +203,7 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
 ## Settings and secrets
 
 `QSettings("CineRemote", "CineRemote")` keys: `view`, `manual_hosts`, `cards/<key>/live`,
-`cards/<key>/armed`, `audio/<key>/gain_db`, `audio/<key>/mute`, `updates/auto`, `updates/last_check`.
+`cards/<key>/armed`, `cards/<key>/multiview`, `deck/selected`, `audio/<key>/gain_db`, `audio/<key>/mute`, `updates/auto`, `updates/last_check`.
 Phone passwords live in the OS keychain via `keyring` (service `cineremote`, user = camera key).
 Logs: `<temp>/cineremote.log`, `<temp>/cineremote-update.log`.
 
