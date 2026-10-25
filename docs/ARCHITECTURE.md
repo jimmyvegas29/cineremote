@@ -89,7 +89,11 @@ Galaxy S24 Ultra, iPhone 16, iPad Pro).
    The password itself never crosses the network.
 3. **WebRTC** - the **phone always sends the offer**; the controller only answers. Sending our own first
    offer breaks the session. The first offer can be empty (no m-lines): answer minimally and wait.
-   The data channel is named `signaling-channel`.
+   The data channel is named `signaling-channel`. Our media answer gets `stereo=1;sprop-stereo=1` on its
+   Opus fmtp (`rtc_compat.opus_stereo`): aiortc leaves it out, and without it the phone's WebRTC encoder
+   sends mono, which decodes as identical left/right (the meters moved in lockstep). Measured on the S20
+   app: mono answer = bit-identical channels, stereo answer = independent channels.
+   `CINEREMOTE_MONO_AUDIO=1` restores the old answer for A/B tests.
 4. **Control** - protobuf `ControllerMessages` / `SubordinateMessages` on the data channel
    (`proto/*.proto`, package `cineremote.camctl.v5`; package names never travel on the wire, only field
    numbers). `HelloRequest/Response`, then `ReadPropertyRequest` for every `PropertyId` and

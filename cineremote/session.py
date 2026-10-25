@@ -12,6 +12,7 @@ Lifecycle (all verified against Blackmagic Camera 3.5.0 on Android):
 """
 import asyncio
 import logging
+import os
 import time
 import uuid as uuidlib
 
@@ -358,8 +359,11 @@ class CameraSession:
                                              else rtc_compat.REORDER_DEADLINE_S)
                 log.info("media: %s", "NACK retransmission offered" if rtx else
                          "no retransmission offered: lost packets -> immediate keyframe request")
+                answer = self._pc.localDescription.sdp
+                if os.environ.get("CINEREMOTE_MONO_AUDIO") != "1":     # A/B testing switch
+                    answer = rtc_compat.opus_stereo(answer)
                 self._send(subordinate_message_id=sub_msg_id,
-                           webrtc_sdp_response=pm.msg("WebRtcSdpResponse")(data=self._pc.localDescription.sdp))
+                           webrtc_sdp_response=pm.msg("WebRtcSdpResponse")(data=answer))
             except Exception:
                 log.exception("media renegotiation failed")
 

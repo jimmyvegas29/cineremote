@@ -125,6 +125,24 @@ def offers_retransmission(sdp):
     return re.search(r"^a=rtcp-fb:\S+ nack\s*$", sdp, re.M) is not None
 
 
+def opus_stereo(sdp):
+    """Add stereo=1 to every Opus line of our answer. Without it a WebRTC sender encodes mono (the
+    receiver's fmtp is what allows stereo), and the decoder then plays that one channel on both sides."""
+    import re
+    nl = "\r\n" if "\r\n" in sdp else "\n"
+    lines = sdp.split(nl)
+    for pt in re.findall(r"^a=rtpmap:(\d+) opus/48000/2\s*$", sdp, re.M | re.I):
+        i = next((n for n, ln in enumerate(lines) if ln.startswith(f"a=fmtp:{pt} ")), None)
+        if i is None:
+            j = next(n for n, ln in enumerate(lines) if ln.startswith(f"a=rtpmap:{pt} "))
+            lines.insert(j + 1, f"a=fmtp:{pt} stereo=1;sprop-stereo=1")
+        else:
+            for p in ("stereo=1", "sprop-stereo=1"):
+                if not re.search(rf"[ ;]{p}(;|$)", lines[i]):
+                    lines[i] += ";" + p
+    return nl.join(lines)
+
+
 def set_hole_deadline(pc, seconds):
     for t in pc.getTransceivers():
         jb = getattr(t.receiver, "_RTCRtpReceiver__jitter_buffer", None)
