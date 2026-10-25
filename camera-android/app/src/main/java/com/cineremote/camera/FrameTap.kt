@@ -1,15 +1,20 @@
 package com.cineremote.camera
 
 import android.graphics.Matrix
+import android.opengl.GLES20
 import android.graphics.ImageFormat
 import android.graphics.YuvImage
 import android.os.Handler
 import android.util.Log
 import android.view.Surface
 import org.webrtc.EglBase
+import org.webrtc.GlRectDrawer
+import org.webrtc.GlTextureFrameBuffer
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.TextureBufferImpl
 import org.webrtc.VideoFrame
+import org.webrtc.VideoFrameDrawer
+import org.webrtc.YuvConverter
 
 /**
  * The camera's always-on GPU frame tap and its only output besides the recorder. The camera renders into
@@ -39,6 +44,10 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
     @Volatile var previewSink: org.webrtc.VideoSink? = null
     /** Latest histogram: R, G, B rows of [BINS] bins, each normalised to 0..1. */
     @Volatile var histogram: Array<FloatArray>? = null
+    /** The latest 160x90 ARGB copy of the picture (the LUT picker's thumbnails). */
+    @Volatile var thumb: IntArray? = null
+    private var lastPreviewNs = 0L
+    private var lastSinkNs = 0L
     private var lastHistNs = 0L
     private var histFailed = false
     /** Debug: save the next upright frame (exactly what the stream encoder gets) to this file as a JPEG. */
@@ -64,17 +73,17 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
             preTranslate(-0.5f, -0.5f)
         }
         val upright = VideoFrame(buf.applyTransformMatrix(m, buf.width, buf.height), 0, frame.timestampNs)
-        previewSink?.onFrame(upright)
-        sink?.let { deliver ->
-            // the stream stays within 1080p: bigger formats (4K, open gate) are scaled on the GPU, whole frame kept
-            val ub = upright.buffer
-            if (ub.width.toLong() * ub.height > STREAM_MAX_PIXELS) {
-                val k = minOf(1920f / ub.width, 1080f / ub.height)
-                val w = (ub.width * k).toInt() and 1.inv(); val h = (ub.height * k).toInt() and 1.inv()
-                val scaled = VideoFrame(ub.cropAndScale(0, 0, ub.width, ub.height, w, h), 0, upright.timestampNs)
-                deliver(scaled)
-                scaled.release()
-            } else deliver(upright)
+        // off-speed runs the sensor at up to 120 fps: the screen needs no more than 60, the stream 30
+        val ts = frame.timestampNs
+        val previewDue = previewSink != null && ts - lastPreviewNs >= 15_000_000L
+        val sinkDue = sink != null && ts - lastSinkNs >= 30_000_000L
+        if (previewDue || sinkDue) {
+            // one GPU copy (at most 1080p, whole frame) feeds both the screen and the stream
+            previewCopy(upright)?.let { cp ->
+                if (previewDue) { lastPreviewNs = ts; previewSink?.onFrame(cp) }
+                if (sinkDue) { lastSinkNs = ts; sink?.invoke(cp) }
+                cp.release()
+            }
         }
         stats(frame.timestampNs)
         if (frame.timestampNs - lastHistNs > 200_000_000L) {
@@ -87,6 +96,31 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
         }
         snapshotTo?.let { f -> snapshotTo = null; runCatching { snapshot(upright.buffer, f) }.onFailure { Log.w(TAG, "snapshot", it) } }
         upright.release()
+    }
+
+    // Screen and stream get a GPU copy, not the camera's texture: the renderer holds a frame until the display
+    // swaps and the encoder until it has drawn it, and while the camera texture is held no new camera frame
+    // can be taken - fine at 30 fps, but at 120 fps (off-speed) the camera stalls and errors out. Copies are
+    // at most 1080p (which also sizes the stream for 4K/open gate) and rotate through a ring of framebuffers.
+    private var copyDrawer: GlRectDrawer? = null
+    private val copies = arrayOfNulls<GlTextureFrameBuffer>(6)
+    private var nextCopy = 0
+    private var yuv: YuvConverter? = null
+
+    private fun previewCopy(f: VideoFrame): VideoFrame? {
+        val tb = f.buffer as? VideoFrame.TextureBuffer ?: return null
+        val k = minOf(1f, 1920f / tb.width, 1080f / tb.height)
+        val w = (tb.width * k).toInt() and 1.inv(); val h = (tb.height * k).toInt() and 1.inv()
+        val fb = copies[nextCopy] ?: GlTextureFrameBuffer(GLES20.GL_RGBA).also { copies[nextCopy] = it }
+        nextCopy = (nextCopy + 1) % copies.size
+        fb.setSize(w, h)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fb.frameBufferId)
+        VideoFrameDrawer.drawTexture(copyDrawer ?: GlRectDrawer().also { copyDrawer = it }, tb, Matrix(), w, h, 0, 0, w, h)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glFlush()           // submit before the renderer/encoder sample it from their (shared) contexts
+        val out = TextureBufferImpl(w, h, VideoFrame.TextureBuffer.Type.RGB, fb.textureId, Matrix(), handler,
+            yuv ?: YuvConverter().also { yuv = it }, null)
+        return VideoFrame(out, 0, f.timestampNs)
     }
 
     /** Debug: log the delivered frame rate and missed frames every 5 s. */
@@ -108,6 +142,7 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
         small.release()
         if (i420 == null) return null
         val bins = Array(3) { IntArray(BINS) }
+        val argb = IntArray(i420.width * i420.height)
         val y = i420.dataY; val u = i420.dataU; val v = i420.dataV
         for (row in 0 until i420.height) {
             for (col in 0 until i420.width) {
@@ -118,9 +153,11 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
                 val g = (yy - 0.213f * cb - 0.533f * cr).toInt().coerceIn(0, 255)
                 val bl = (yy + 2.112f * cb).toInt().coerceIn(0, 255)
                 bins[0][r * BINS / 256]++; bins[1][g * BINS / 256]++; bins[2][bl * BINS / 256]++
+                argb[row * i420.width + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
             }
         }
         i420.release()
+        thumb = argb
         // normalise each channel to its own peak, ignoring the clipped end bins so they don't flatten the rest
         return Array(3) { c ->
             val peak = (1 until BINS - 1).maxOf { bins[c][it] }.coerceAtLeast(1).toFloat()
@@ -146,6 +183,7 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
 
     fun release() {
         sink = null
+        runCatching { copies.forEach { it?.release() }; copyDrawer?.release(); yuv?.release() }
         runCatching { helper.stopListening() }
         runCatching { surface.release() }
         runCatching { helper.dispose() }
@@ -155,6 +193,5 @@ class FrameTap(context: android.content.Context, private val transform: () -> Pa
     companion object {
         const val TAG = "CRCam.Tap"
         const val BINS = 64
-        const val STREAM_MAX_PIXELS = 1920L * 1088
     }
 }

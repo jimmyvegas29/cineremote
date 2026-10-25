@@ -28,15 +28,23 @@ like any other camera — live preview, manual controls, recording.
 - Editors like the Blackmagic app's: rulers with AUTO, ISO preset buttons, white balance presets with a
   Kelvin ruler and lock, shutter (auto exposure) lock, a lens row with the zoom ruler, and a guides
   toolbar (torch, focus assist, safe area, frame guides 2.76:1 … 1:1, grids, zebra).
-- **Focus assist** (peaking: coloured lines or Peak glow, five colours) and **zebras** (Mid Grey, MG+1,
-  75–100%), drawn by the preview's shader: on the phone screen only, never in recordings or the stream.
+- **Monitoring** (drawn by the preview's shader, so on the phone screen only, never in recordings or the
+  stream): display **LUTs** (built-in looks plus imported .cube files, picked from live thumbnails), **false
+  colour**, **focus assist** (coloured lines or Peak glow) and **zebras** (Mid Grey, MG+1, 75–100%).
+- **Face detection**: boxes on faces; with AF on AUTO, focus and exposure follow the largest face.
+- **Off-speed** (slow motion): the sensor runs faster than the project rate, e.g. 120 fps played at 30.
+  **Timelapse**: one frame every 1 s … 10 min. Both from the FPS panel, both reported to CineRemote.
+- **Presets** (left-edge dots): save, apply, update, rename, delete whole camera setups.
+- **Slate** (left-edge dots or Settings): reel, scene, take (auto-increment), INT/EXT, DAY/NIGHT, good
+  take, production, director, operator - shared with CineRemote's slate editor. Clips are named like a
+  Blackmagic camera's (`C001_10242051_C005.mp4`) with the slate in the clip's description.
+- **Function buttons** F1–F3 (right-edge dots), each assignable to one of 16 actions; long-press to change.
 - **Settings**: Record (codec, bit rate, resolution/aspect), Camera (lock WB on record, volume-key record,
   stabilisation), Audio (gain, stereo/mono), Monitor (focus assist style and colour, zebra level, guide/grid
   opacity, which panels show), Remote
   Camera Control (on/off, name, letter, password).
 
-Not done yet (Blackmagic features with no equivalent here): LUTs, false colour, face detection,
-presets, slate metadata, timelapse and off-speed, function buttons, live streaming, chat, proxies, cloud.
+Not planned: live streaming, chat, proxies, Blackmagic Cloud.
 
 Verified on a Samsung Galaxy S20 FE (Android 13) against CineRemote on Windows.
 
@@ -74,8 +82,19 @@ compiled into the APK by the Gradle protobuf plugin.
 | `FrameTap.kt` | the camera's GPU frame tap: turns frames upright, feeds the preview, stream and histogram |
 | `AudioInput.kt` | the mic: gain, meter levels, PCM for the recorder |
 | `CameraHud.kt` | the on-phone camera screen |
-| `FocusAids.kt` | zebras + focus assist: the preview renderer's GL drawer and shader |
+| `MonitorAids.kt` | LUT, false colour, focus assist, zebras: the preview renderer's GL drawer and shader |
+| `Luts.kt` | built-in looks, .cube parsing/import |
+| `Presets.kt` / `Slate.kt` | saved setups; the clip slate, file names and descriptions |
 | `SettingsPanel.kt` | the Settings screen |
 | `MainActivity.kt` | wiring, preview placement, media / remote |
+
+Phone quirks found on the S20 FE (Snapdragon 865), which shaped the design:
+- Three camera outputs at 1080p30 drop to ~26 fps, so the camera feeds only the frame tap and the encoder;
+  the preview and stream are drawn from GPU copies of the tap's frames.
+- The camera service re-stamps frames for a video encoder on the monotonic clock even when the camera
+  reports boot time; recorded audio is stamped on the monotonic clock to match.
+- Samsung's HAL can't build its preview+video high-frame-rate pipeline (the autofocus stage fails), so a
+  120 fps take records the encoder alone and the picture pauses for the take. 240 fps is advertised but
+  delivers black frames; the app detects that and stops offering the rate.
 
 The UI font is [Lato](https://www.latofonts.com/) (SIL Open Font License, see `LATO_OFL.txt`).

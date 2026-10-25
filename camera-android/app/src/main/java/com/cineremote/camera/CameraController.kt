@@ -19,14 +19,12 @@ class CameraController(
     private val engine: CameraEngine,
     private val recorder: Recorder,
     private val takes: Takes,
+    private val slateModel: Slate,
     private val prefs: Prefs,
     private val batteryPct: () -> Float,
     private val send: (SubordinateMessage) -> Unit,
 ) {
     private var msgId = 0L
-    private var slateReel = 1
-    private var slateScene = "1"
-    private var slateTake = 1
 
     @Synchronized private fun out(block: SubordinateMessage.Builder.() -> Unit) {
         send(SubordinateMessage.newBuilder().setMessageId(++msgId).apply(block).build())
@@ -142,8 +140,14 @@ class CameraController(
             activeCam = ActiveCamProperty.newBuilder().setCameraId(engine.lens.id).setIsAuto(false).build()
         }
         "cam_framerate" -> prop(PropertyId.PROPERTY_ID_CAM_FRAMERATE) {
-            camFramerate = CamFramerateProperty.newBuilder()
-                .setPlaybackFrameRate(FrameRate.newBuilder().setNum(engine.fps).setDen(1)).build()
+            val b = CamFramerateProperty.newBuilder()
+                .setPlaybackFrameRate(FrameRate.newBuilder().setNum(engine.fps).setDen(1))
+                .setIsOffSpeedEnabled(engine.offSpeed)
+                .setOffSpeedFrameRate(FrameRate.newBuilder().setNum(engine.offSpeedFps).setDen(1))
+                .setIsTimelapseRecording(prefs.timelapse)
+                .setTimelapseInterval(TimelapseInterval.newBuilder().setType(TimelapseIntervalType.TIMELAPSE_INTERVAL_TYPE_SECONDS)
+                    .setCount(prefs.timelapseSecs))
+            camFramerate = b.build()
         }
         "cam_frame_rate_range" -> prop(PropertyId.PROPERTY_ID_CAM_FRAME_RATE_RANGE) {
             val b = CamFrameRateRangeProperty.newBuilder().setCameraId(engine.lens.id)
@@ -250,7 +254,11 @@ class CameraController(
             audioSource = AudioSourceProperty.newBuilder().setActiveSourceName("Built-in").setNumOfChannels(2).build()
         }
         "slate" -> prop(PropertyId.PROPERTY_ID_SLATE) {
-            slate = SlateProperty.newBuilder().setReel(slateReel).setScene(slateScene).setTake(slateTake).build()
+            slate = SlateProperty.newBuilder().setReel(slateModel.reel).setScene(slateModel.scene).setTake(slateModel.take)
+                .setLight(SlateLight.forNumber(slateModel.light) ?: SlateLight.SLATE_LIGHT_UNSPECIFIED)
+                .setTimeOfDay(SlateTimeOfDay.forNumber(slateModel.timeOfDay) ?: SlateTimeOfDay.SLATE_TIME_OF_DAY_UNSPECIFIED)
+                .setIsGoodTakeLastClip(slateModel.goodTake).setProductionName(slateModel.production).setDirector(slateModel.director)
+                .setCameraOperator(slateModel.operator).setIsTakeAutoIncrementEnabled(slateModel.autoIncrement).build()
         }
         "state" -> prop(PropertyId.PROPERTY_ID_STATE) {
             state = StateProperty.newBuilder().setControlMode(ControlMode.CONTROL_MODE_FULL_CONTROL).build()
@@ -294,8 +302,17 @@ class CameraController(
     private fun applyWrite(prop: Property): String? = when (prop.valueCase) {
         Property.ValueCase.ACTIVE_CAM -> { engine.switchLens(prop.activeCam.cameraId); "active_cam" }
         Property.ValueCase.CAM_FRAMERATE -> {
-            val fr = prop.camFramerate.playbackFrameRate
-            engine.fps = (fr.num / fr.den.coerceAtLeast(1)).coerceIn(1, 240); prefs.fps = engine.fps
+            val f = prop.camFramerate
+            val fr = f.playbackFrameRate
+            if (fr.num > 0) { engine.fps = (fr.num / fr.den.coerceAtLeast(1)).coerceIn(1, 240); prefs.fps = engine.fps }
+            if (f.hasTimelapseInterval() && f.timelapseInterval.count > 0) prefs.timelapseSecs = when (f.timelapseInterval.type) {
+                TimelapseIntervalType.TIMELAPSE_INTERVAL_TYPE_MINUTES -> f.timelapseInterval.count * 60
+                TimelapseIntervalType.TIMELAPSE_INTERVAL_TYPE_FRAMES -> maxOf(1, f.timelapseInterval.count / maxOf(1, engine.fps))
+                else -> f.timelapseInterval.count
+            }
+            prefs.timelapse = f.isTimelapseRecording
+            val os = f.offSpeedFrameRate.let { if (it.num > 0) it.num / it.den.coerceAtLeast(1) else null }
+            engine.setOffSpeed(f.isOffSpeedEnabled, os)
             engine.apply(); "cam_framerate"
         }
         Property.ValueCase.CAM_SENSIBILITY -> {
@@ -346,13 +363,23 @@ class CameraController(
         }
         Property.ValueCase.SLATE -> {
             val s = prop.slate
-            if (s.hasReel()) slateReel = s.reel
-            if (s.hasScene()) slateScene = s.scene
-            if (s.hasTake()) slateTake = s.take
+            if (s.hasReel()) slateModel.reel = s.reel
+            if (s.hasScene()) slateModel.scene = s.scene
+            if (s.hasTake()) slateModel.take = s.take
+            if (s.hasLight()) slateModel.light = s.lightValue
+            if (s.hasTimeOfDay()) slateModel.timeOfDay = s.timeOfDayValue
+            if (s.hasProductionName()) slateModel.production = s.productionName
+            if (s.hasDirector()) slateModel.director = s.director
+            if (s.hasCameraOperator()) slateModel.operator = s.cameraOperator
+            if (s.hasIsTakeAutoIncrementEnabled()) slateModel.autoIncrement = s.isTakeAutoIncrementEnabled
+            if (s.hasIsGoodTakeLastClip()) onGoodTake?.invoke(s.isGoodTakeLastClip)
             "slate"
         }
         else -> { Log.d(TAG, "unhandled write ${prop.valueCase}"); null }
     }
+
+    /** CineRemote marked (or unmarked) the last clip as a good take. */
+    var onGoodTake: ((Boolean) -> Unit)? = null
 
     // ------------------------------------------------------------------ recording
     // Takes notifies MainActivity when a take really starts/ends, which emits recording_state to us.

@@ -19,6 +19,7 @@ class ControllerSession(
     private val engine: CameraEngine,
     private val recorder: Recorder,
     takes: Takes,
+    slate: Slate,
     private val prefs: Prefs,
     private val tap: FrameTap,
     audio: AudioInput,
@@ -27,7 +28,7 @@ class ControllerSession(
 ) {
     private val rtc = RtcLink(context, tap.egl) { audio.gain }
     private var closed = false
-    val controller = CameraController(engine, recorder, takes, prefs, batteryPct) { m -> sendSubordinate(m) }
+    val controller = CameraController(engine, recorder, takes, slate, prefs, batteryPct) { m -> sendSubordinate(m) }
 
     fun start() {
         controller.onStartPreview = {

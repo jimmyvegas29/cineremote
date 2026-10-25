@@ -35,7 +35,7 @@ class CameraHud(context: Context) : View(context) {
     lateinit var recorder: Recorder
     lateinit var prefs: Prefs
     var audio: AudioInput? = null
-    lateinit var aids: FocusAids
+    lateinit var aids: MonitorAids
     var histogram: () -> Array<FloatArray>? = { null }
     var recording: () -> Boolean = { false }
     var plannedBitrate: () -> Int = { 20_000_000 }
@@ -45,6 +45,12 @@ class CameraHud(context: Context) : View(context) {
     var onRemote: () -> Unit = {}
     var onParamChanged: (Any?) -> Unit = {}
     var onGainChanged: (Int) -> Unit = {}
+    lateinit var slate: Slate
+    lateinit var presets: Presets
+    /** The latest small (160x90) ARGB copy of the picture, for LUT thumbnails. */
+    var smallFrame: () -> IntArray? = { null }
+    var onLutChanged: (String?) -> Unit = {}
+    var onGoodTake: (Boolean) -> Unit = {}
     /** The picture's rectangle in this view; MainActivity places the preview view there. */
     var onPreviewRect: (Rect) -> Unit = {}
     var connected = false
@@ -61,8 +67,14 @@ class CameraHud(context: Context) : View(context) {
     private var grid = Grid.OFF
     private var panelsOn = true
     private var expanded: Expanded? = null  // a bottom panel opened up
+    private var lutPanel = false            // LUT picker (tool column LUT button)
+    private var presetsPanel = false        // presets (left handle)
+    private var selectedPreset = -1
+    private var sideMenu = false            // left handle: presets + slate buttons
+    private var fnShown = false             // right handle: F1-F3
+    private var cleanFeed = false           // function-button action: hide the overlays
 
-    private enum class GuideTool { TORCH, FOCUS, SAFE, FRAME, GRID, ZEBRA }
+    private enum class GuideTool { TORCH, FOCUS, FALSE, SAFE, FRAME, GRID, FACE, ZEBRA }
     private enum class Grid(val label: String) { OFF("Off"), THIRDS("Thirds"), CROSS("Crosshair"), DOT("Centre dot"), THIRDS_CROSS("Thirds +") }
     private enum class Expanded { AUDIO, HISTOGRAM }
 
@@ -138,7 +150,7 @@ class CameraHud(context: Context) : View(context) {
 
     private fun value(p: P): String = when (p) {
         P.LENS -> "${(engine.lens.equivMm * engine.zoom).roundToInt()}mm"
-        P.FPS -> "${engine.fps}"
+        P.FPS -> when { engine.offSpeed -> "${engine.offSpeedFps}"; prefs.timelapse -> "TL"; else -> "${engine.fps}" }
         P.SHUTTER -> "1/${if (engine.shutterAuto) engine.shutterDenFromNs(engine.liveExposureNs) else engine.shutterDen}"
         P.IRIS -> engine.aperture.let { if (it > 0) "f%.1f".format(it) else "f--" }
         P.ISO -> "${if (engine.isoAuto) engine.isoStop(engine.liveIso) else engine.iso}"
@@ -209,23 +221,32 @@ class CameraHud(context: Context) : View(context) {
         buttons.clear(); rulers.clear(); sliders.clear()
         drawBackground(c)
         drawOverlays(c)
-        drawReadouts(c)
-        drawTimecode(c)
-        drawFormatBadge(c)
-        if (connected) drawRemoteIndicator(c)
+        drawFaces(c)
+        if (!cleanFeed) {
+            drawReadouts(c)
+            drawTimecode(c)
+            drawFormatBadge(c)
+            if (connected) drawRemoteIndicator(c)
+        }
         drawEdgeHandles(c)
+        if (sideMenu) drawSideMenu(c)
+        if (fnShown && prefs.functionButtons) drawFunctionButtons(c)
         val sel = selected
         when {
             sel != null -> drawEditor(c, sel)
             guidesOn -> drawGuidesBar(c)
+            lutPanel -> drawLutPanel(c)
+            presetsPanel -> drawPresetsPanel(c)
             expanded == Expanded.AUDIO -> drawAudioExpanded(c)
             expanded == Expanded.HISTOGRAM -> drawParade(c)
-            panelsOn -> {
+            panelsOn && !cleanFeed -> {
+                if (aids.falseColor) drawFalseColourKey(c)
                 if (prefs.showHistogram) drawHistogramPanel(c)
                 if (prefs.showStorage) drawMediaPanel(c)
                 if (prefs.showAudioMeters) drawAudioPanel(c)
             }
         }
+        if (recorder.isRecording && !engine.streamInSession) drawHighSpeedNotice(c)
         drawReticle(c)
         drawToolColumn(c)
         drawNavRail(c)
@@ -312,6 +333,11 @@ class CameraHud(context: Context) : View(context) {
 
     private fun timecode(): String {
         if (!recorder.isRecording) return "00:00:00:00"
+        if (recorder.current?.timelapse == true) {        // timelapse: the clip's length so far, not wall time
+            val f = recorder.framesWritten; val fps = engine.fps.coerceAtLeast(1)
+            val sec = f / fps
+            return "%02d:%02d:%02d:%02d".format(sec / 3600, (sec / 60) % 60, sec % 60, f % fps)
+        }
         val ms = (now() - recorder.startWallMs).coerceAtLeast(0)
         val sec = ms / 1000
         val frames = (ms % 1000) * engine.fps / 1000
@@ -332,7 +358,15 @@ class CameraHud(context: Context) : View(context) {
             c.drawText(g, cx + (w - text.measureText(g)) / 2, y(88f), text)
             cx += w
         }
+        val mode = when {
+            engine.offSpeed -> "OFF SPEED  ${engine.offSpeedFps} fps  \u2192  ${engine.fps}"
+            prefs.timelapse -> "TIMELAPSE  1 frame every ${intervalLabel(prefs.timelapseSecs)}"
+            else -> null
+        }
+        mode?.let { textC(accent, 19 * s, latoBold, shadow = true); centered(c, it, x(927f), y(120f)) }
     }
+
+    private fun intervalLabel(secs: Int) = if (secs >= 60 && secs % 60 == 0) "${secs / 60} min" else "${secs}s"
 
     private var badgeRect = RectF()
 
@@ -383,6 +417,211 @@ class CameraHud(context: Context) : View(context) {
         }
         leftHandle = handle(x(29f))
         rightHandle = handle(x(1812f))
+    }
+
+    /** Left handle: Presets and Slate buttons, like the Blackmagic app's. */
+    private fun drawSideMenu(c: Canvas) {
+        val cy = frame.centerY()
+        for ((i, which) in listOf("presets", "slate").withIndex()) {
+            val r = RectF(x(62f), cy + (i * 2 - 1) * 58 * s - 40 * s, x(142f), cy + (i * 2 - 1) * 58 * s + 40 * s)
+            val on = which == "presets" && presetsPanel
+            fillC(if (on) accent else Color.argb(150, 0, 0, 0)); c.drawRoundRect(r, 16 * s, 16 * s, fill)
+            if (which == "presets") drawPresetsIcon(c, r.centerX(), r.centerY()) else drawSlateIcon(c, r.centerX(), r.centerY())
+            buttons += Btn(r) {
+                if (which == "presets") { val open = !presetsPanel; collapse(); presetsPanel = open; sideMenu = true }
+                else { sideMenu = false; onSettings("slate") }
+                invalidate()
+            }
+        }
+    }
+
+    private fun drawPresetsIcon(c: Canvas, cx: Float, cy: Float) {
+        strokeC(Color.WHITE, 3 * s)
+        c.drawRoundRect(RectF(cx - 15 * s, cy - 22 * s, cx + 15 * s, cy + 22 * s), 6 * s, 6 * s, stroke)
+        for (i in -1..1) { c.drawLine(cx - 8 * s, cy + i * 10 * s, cx + 2 * s, cy + i * 10 * s, stroke); fillC(Color.WHITE); c.drawCircle(cx + 8 * s, cy + i * 10 * s, 3 * s, fill) }
+    }
+
+    private fun drawSlateIcon(c: Canvas, cx: Float, cy: Float) {
+        strokeC(Color.WHITE, 3 * s)
+        c.drawRoundRect(RectF(cx - 20 * s, cy - 6 * s, cx + 20 * s, cy + 20 * s), 3 * s, 3 * s, stroke)
+        path.reset(); path.moveTo(cx - 20 * s, cy - 8 * s); path.lineTo(cx + 18 * s, cy - 20 * s); c.drawPath(path, stroke)
+        for (i in 0..2) c.drawLine(cx - 12 * s + i * 11 * s, cy - 10 * s - i * 3.5f * s, cx - 6 * s + i * 11 * s, cy - 6 * s - i * 3.5f * s, stroke)
+    }
+
+    // ---- function buttons (right handle)
+    private val fnRects = arrayOfNulls<RectF>(3)
+
+    private fun drawFunctionButtons(c: Canvas) {
+        val cy = frame.centerY()
+        for (i in 0..2) {
+            val r = RectF(x(1718f), cy + (i - 1) * 104 * s - 42 * s, x(1792f), cy + (i - 1) * 104 * s + 42 * s)
+            val action = prefs.fn(i)
+            val on = fnActive(action)
+            fillC(if (on) accent else Color.argb(150, 0, 0, 0)); c.drawRoundRect(r, 14 * s, 14 * s, fill)
+            strokeC(Color.argb(170, 255, 255, 255), 2 * s); c.drawRoundRect(r, 14 * s, 14 * s, stroke)
+            textC(Color.WHITE, 24 * s, latoBlack); centered(c, "F${i + 1}", r.centerX(), r.centerY() + 2 * s)
+            textC(Color.argb(220, 255, 255, 255), 13 * s, latoBold); centered(c, FN_SHORT[action] ?: "", r.centerX(), r.centerY() + 24 * s)
+            fnRects[i] = r
+        }
+    }
+
+    private fun fnActive(a: String): Boolean = when (a) {
+        "RECORD" -> recorder.isRecording; "TORCH" -> engine.torch; "FOCUS" -> aids.focusAssist; "ZEBRA" -> aids.zebra != null
+        "FALSE" -> aids.falseColor; "FACE" -> engine.faceDetect; "LUT" -> prefs.lut != null; "GUIDES" -> frameGuide != null
+        "GRID" -> grid != Grid.OFF; "STAB" -> engine.stabilization; "AE" -> autoExposure; "AELOCK" -> engine.aeLock
+        "AWBLOCK" -> engine.awbLock; "GOOD" -> slate.goodTake; "CLEAN" -> cleanFeed; else -> false
+    }
+
+    /** Run a function-button action (also used by nothing else, so all toggles live here). */
+    private fun runFn(a: String) {
+        when (a) {
+            "RECORD" -> onRecordToggle()
+            "TORCH" -> { engine.torch = !engine.torch; changed() }
+            "FOCUS" -> setFocusAssist(!aids.focusAssist, aids.peakStyle)
+            "ZEBRA" -> setZebra(if (aids.zebra == null) prefs.str("last_zebra", "95") else null)
+            "FALSE" -> aids.falseColor = !aids.falseColor
+            "FACE" -> engine.setFaceDetect(!engine.faceDetect)
+            "LUT" -> if (prefs.lut != null) onLutChanged(null) else onLutChanged(prefs.str("last_lut", Luts.BUILT_IN.first()))
+            "GUIDES" -> frameGuide = if (frameGuide == null) "2.39:1" else null
+            "GRID" -> grid = if (grid == Grid.OFF) Grid.THIRDS else Grid.OFF
+            "STAB" -> { engine.stabilization = !engine.stabilization; changed() }
+            "AE" -> toggleAuto(P.EV)
+            "AELOCK" -> { engine.aeLock = !engine.aeLock; if (engine.aeLock) { engine.isoAuto = true; engine.shutterAuto = true }; changed() }
+            "AWBLOCK" -> { engine.awbLock = !engine.awbLock; if (engine.awbLock) engine.wbAuto = true; changed() }
+            "FLIP" -> onTool(Tool.FLIP)
+            "GOOD" -> onGoodTake(!slate.goodTake)
+            "CLEAN" -> cleanFeed = !cleanFeed
+        }
+        invalidate()
+    }
+
+    /** A high-speed take records the encoder only (see CameraEngine.createSession): say why the picture froze. */
+    private fun drawHighSpeedNotice(c: Canvas) {
+        val r = RectF(x(560f), y(440f), x(1294f), y(600f))
+        fillC(Color.argb(200, 0, 0, 0)); c.drawRoundRect(r, 16 * s, 16 * s, fill)
+        textC(red, 34 * s, latoBlack); centered(c, "●  SLOW MOTION ${engine.offSpeedFps} fps", r.centerX(), r.top + 62 * s)
+        textC(Color.WHITE, 21 * s, lato); centered(c, "The picture pauses while a ${engine.offSpeedFps} fps take records", r.centerX(), r.top + 110 * s)
+    }
+
+    /** Face boxes: corner brackets, the face that drives autofocus in yellow. */
+    private fun drawFaces(c: Canvas) {
+        if (!engine.faceDetect) return
+        for ((i, f) in engine.faces.take(5).withIndex()) {
+            val r = RectF(pv.left + f.left * pv.width(), pv.top + f.top * pv.height(), pv.left + f.right * pv.width(), pv.top + f.bottom * pv.height())
+            strokeC(if (i == 0) Color.rgb(245, 197, 24) else Color.argb(200, 255, 255, 255), 3 * s)
+            val k = minOf(r.width(), r.height()) * 0.25f
+            path.reset()
+            path.moveTo(r.left, r.top + k); path.lineTo(r.left, r.top); path.lineTo(r.left + k, r.top)
+            path.moveTo(r.right - k, r.top); path.lineTo(r.right, r.top); path.lineTo(r.right, r.top + k)
+            path.moveTo(r.right, r.bottom - k); path.lineTo(r.right, r.bottom); path.lineTo(r.right - k, r.bottom)
+            path.moveTo(r.left + k, r.bottom); path.lineTo(r.left, r.bottom); path.lineTo(r.left, r.bottom - k)
+            c.drawPath(path, stroke)
+        }
+    }
+
+    /** False colour key above the bottom panels. */
+    private fun drawFalseColourKey(c: Canvas) {
+        val keys = MonitorAids.FALSE_KEY
+        val w = 150 * s
+        val left = x(927f) - w * keys.size / 2
+        val r0 = RectF(left - 10 * s, y(812f), left + w * keys.size + 10 * s, y(856f))
+        fillC(Color.argb(140, 0, 0, 0)); c.drawRoundRect(r0, 10 * s, 10 * s, fill)
+        for ((i, k) in keys.withIndex()) {
+            val (label, rgb) = k
+            fillC(Color.rgb((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF))
+            c.drawRoundRect(RectF(left + i * w + 6 * s, y(824f), left + i * w + 26 * s, y(844f)), 4 * s, 4 * s, fill)
+            textC(Color.WHITE, 16 * s, latoBold); c.drawText(label, left + i * w + 32 * s, y(840f), text)
+        }
+    }
+
+    // ---- LUT picker (tool column LUT button): live thumbnails of each look
+    private var lutScroll = 0f
+    private var lutCards = ArrayList<Pair<RectF, String?>>()
+    private val thumbs = HashMap<String, android.graphics.Bitmap>()
+    private var thumbsAt = 0L
+
+    private fun refreshThumbs(names: List<String>) {
+        if (now() - thumbsAt < 1500 && thumbs.size == names.size + 1) return
+        val src = smallFrame() ?: return
+        thumbsAt = now()
+        thumbs["\u0000off"] = android.graphics.Bitmap.createBitmap(src, 160, 90, android.graphics.Bitmap.Config.ARGB_8888)
+        for (n in names) {
+            val lut = Luts.load(context, n) ?: continue
+            val px = IntArray(src.size) { lut.apply(src[it]) }
+            thumbs[n] = android.graphics.Bitmap.createBitmap(px, 160, 90, android.graphics.Bitmap.Config.ARGB_8888)
+        }
+    }
+
+    private fun drawLutPanel(c: Canvas) {
+        editorRect = panel(c, 27f, 1828f, 790f, 1017f, alpha = 170)
+        val names = Luts.names(context)
+        refreshThumbs(names)
+        lutCards.clear()
+        val cw = 220 * s
+        val total = cw * (names.size + 1)
+        val view = x(1811f) - x(44f)
+        lutScroll = lutScroll.coerceIn(minOf(0f, view - total), 0f)
+        c.save(); c.clipRect(x(44f), y(790f), x(1811f), y(1017f))
+        for ((i, n) in (listOf<String?>(null) + names).withIndex()) {
+            val l = x(44f) + lutScroll + i * cw
+            if (l > x(1811f) || l + cw < x(44f)) continue
+            val th = RectF(l + 12 * s, y(808f), l + cw - 12 * s, y(808f) + (cw - 24 * s) * 9 / 16)
+            val on = (n == null && prefs.lut == null) || (n != null && n == prefs.lut)
+            val bmp = thumbs[n ?: "\u0000off"]
+            if (bmp != null) c.drawBitmap(bmp, null, th, fill.apply { color = Color.WHITE; isFilterBitmap = true })
+            else { fillC(Color.argb(80, 255, 255, 255)); c.drawRect(th, fill) }
+            strokeC(if (on) accent else Color.argb(90, 255, 255, 255), (if (on) 5f else 2f) * s); c.drawRect(th, stroke)
+            textC(if (on) accent else Color.WHITE, 19 * s, latoBold)
+            centered(c, n ?: "OFF", th.centerX(), th.bottom + 30 * s)
+            lutCards += RectF(l, y(800f), l + cw, y(1010f)) to n
+        }
+        c.restore()
+    }
+
+    // ---- presets (left handle)
+    private fun drawPresetsPanel(c: Canvas) {
+        editorRect = panel(c, 27f, 1828f, 790f, 1017f, alpha = 170)
+        textC(accent, 17 * s, latoBold); centered(c, "PRESETS", x(927f), y(815f))
+        val names = presets.names()
+        if (selectedPreset >= names.size) selectedPreset = -1
+        if (names.isEmpty()) {
+            textC(Color.argb(210, 255, 255, 255), 22 * s, lato)
+            centered(c, "No presets yet. Save the current settings with  +", x(927f), y(862f))
+        } else {
+            presetRow(c, names.mapIndexed { i, n -> Item(n, i == selectedPreset) { selectedPreset = if (selectedPreset == i) -1 else i } },
+                x(44f), minOf(x(1811f), x(44f) + names.size * 260 * s), 830f, 885f)
+        }
+        val sel = selectedPreset
+        val acts = listOf<Triple<String, Boolean, () -> Unit>>(
+            Triple("+  Save new", true) { presets.add("Preset ${names.size + 1}", engine, aids); selectedPreset = presets.names().size - 1 },
+            Triple("Apply", sel >= 0) { presets.apply(sel, engine, aids, onLutChanged, onGainChanged); onParamChanged(null) },
+            Triple("Update", sel >= 0) { presets.update(sel, engine, aids) },
+            Triple("Rename", sel >= 0) { renamePreset(sel) },
+            Triple("Delete", sel >= 0) { deletePreset(sel) },
+        )
+        val w = (x(1811f) - x(44f)) / acts.size
+        for ((i, a) in acts.withIndex()) {
+            val r = RectF(x(44f) + i * w + 10 * s, y(925f), x(44f) + (i + 1) * w - 10 * s, y(985f))
+            val (label, enabled, act) = a
+            strokeC(Color.argb(if (enabled) 200 else 60, 255, 255, 255), 2.5f * s); c.drawRoundRect(r, r.height() / 2, r.height() / 2, stroke)
+            textC(Color.argb(if (enabled) 255 else 90, 255, 255, 255), 22 * s, latoBold); centered(c, label, r.centerX(), r.centerY() + 8 * s)
+            if (enabled) buttons += Btn(r) { act(); invalidate() }
+        }
+    }
+
+    private fun renamePreset(i: Int) {
+        val input = android.widget.EditText(context).apply { setText(presets.names().getOrNull(i) ?: ""); setSingleLine() }
+        android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Rename preset").setView(input)
+            .setPositiveButton("Save") { _, _ -> input.text.toString().trim().takeIf { it.isNotEmpty() }?.let { presets.rename(i, it); invalidate() } }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    private fun deletePreset(i: Int) {
+        android.app.AlertDialog.Builder(context, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Delete \"${presets.names().getOrNull(i)}\"?")
+            .setPositiveButton("Delete") { _, _ -> presets.delete(i); selectedPreset = -1; invalidate() }
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun panel(c: Canvas, rx0: Float, rx1: Float, ry0: Float = 870f, ry1: Float = 1017f, alpha: Int = 115): RectF {
@@ -581,7 +820,25 @@ class CameraHud(context: Context) : View(context) {
             }
             right = r.left - 26 * s
         }
+        if (p == P.FPS) {
+            // TIME LAPSE on the left, OFF SPEED on the right, like the Blackmagic app's frame-rate panel
+            val tl = RectF(left, y(925f), left + 190 * s, y(982f))
+            chip(c, tl, "TIME LAPSE", prefs.timelapse)
+            buttons += Btn(tl) { if (!recorder.isRecording) { prefs.timelapse = !prefs.timelapse; if (prefs.timelapse) engine.setOffSpeed(false); onParamChanged(null) } }
+            val os = RectF(right - 190 * s, y(925f), right, y(982f))
+            chip(c, os, "OFF SPEED", engine.offSpeed)
+            buttons += Btn(os) { if (!recorder.isRecording) { val on = !engine.offSpeed; if (on) prefs.timelapse = false; engine.setOffSpeed(on); onParamChanged(null) } }
+            left = tl.right + 26 * s; right = os.left - 26 * s
+        }
         when (p) {
+            P.FPS -> when {
+                engine.offSpeed -> engine.offSpeedChoices.let { ch ->
+                    drawRulerRow(c, ch.map { f -> Item("$f", false) { engine.setOffSpeed(true, f) } }, ch.indexOf(engine.offSpeedFps).coerceAtLeast(0), left, right, "OFF SPEED FPS") }
+                prefs.timelapse -> TIMELAPSE_SECS.let { ch ->
+                    drawRulerRow(c, ch.map { sec -> Item(intervalLabel(sec), false) { prefs.timelapseSecs = sec } },
+                        ch.indexOf(prefs.timelapseSecs).coerceAtLeast(0), left, right, "1 FRAME EVERY") }
+                else -> ruler(p)?.let { (items, cur) -> drawRulerRow(c, items, cur, left, right, "PROJECT FPS") }
+            }
             P.ISO -> {
                 // preset buttons at full stops, like the Blackmagic app
                 val stops = listOf(50, 100, 200, 400, 800, 1600, 3200, 6400, 12800).filter { it in engine.isoRange.lower..engine.isoRange.upper }
@@ -725,14 +982,15 @@ class CameraHud(context: Context) : View(context) {
     // ---- guides toolbar (tool column guides button): torch, focus assist, safe area, frame guides, grid, zebra
     private fun drawGuidesBar(c: Canvas) {
         editorRect = panel(c, 27f, 1828f, 790f, 1017f, alpha = 170)
-        val tools = listOfNotNull(if (engine.hasTorch) GuideTool.TORCH else null, GuideTool.FOCUS, GuideTool.SAFE,
-            GuideTool.FRAME, GuideTool.GRID, GuideTool.ZEBRA)
+        val tools = listOfNotNull(if (engine.hasTorch) GuideTool.TORCH else null, GuideTool.FOCUS, GuideTool.FALSE, GuideTool.SAFE,
+            GuideTool.FRAME, GuideTool.GRID, if (engine.faceDetectSupported) GuideTool.FACE else null, GuideTool.ZEBRA)
         val w = 110 * s
         val start = x(927f) - w * tools.size / 2
         for ((i, t) in tools.withIndex()) {
             val r = RectF(start + i * w + 10 * s, y(800f), start + (i + 1) * w - 10 * s, y(870f))
             val active = when (t) {
                 GuideTool.TORCH -> engine.torch; GuideTool.FOCUS -> aids.focusAssist; GuideTool.SAFE -> safeArea > 0
+                GuideTool.FALSE -> aids.falseColor; GuideTool.FACE -> engine.faceDetect
                 GuideTool.FRAME -> frameGuide != null; GuideTool.GRID -> grid != Grid.OFF; GuideTool.ZEBRA -> aids.zebra != null
             }
             if (t == guideTool && t != GuideTool.TORCH) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
@@ -757,7 +1015,7 @@ class CameraHud(context: Context) : View(context) {
                 presetRow(c, styles, left, left + 520 * s, 925f, 982f)
                 val sw = 64 * s
                 var sx = left + 580 * s
-                for ((name, rgb) in FocusAids.COLORS) {
+                for ((name, rgb) in MonitorAids.COLORS) {
                     val r = RectF(sx, y(925f), sx + 57 * s, y(982f))
                     val col = Color.rgb((rgb[0] * 255).toInt(), (rgb[1] * 255).toInt(), (rgb[2] * 255).toInt())
                     fillC(col); c.drawCircle(r.centerX(), r.centerY(), 20 * s, fill)
@@ -768,10 +1026,28 @@ class CameraHud(context: Context) : View(context) {
                 }
                 chip(c, offR, "OFF", !aids.focusAssist); buttons += Btn(offR) { setFocusAssist(false, aids.peakStyle) }
             }
+            GuideTool.FALSE -> {
+                presetRow(c, listOf(Item("Off", !aids.falseColor) { aids.falseColor = false }, Item("On", aids.falseColor) { aids.falseColor = true }),
+                    left, left + 360 * s, 925f, 982f)
+                val keys = MonitorAids.FALSE_KEY
+                var kx = left + 420 * s
+                for ((label, rgb) in keys) {
+                    fillC(Color.rgb((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF))
+                    c.drawRoundRect(RectF(kx, y(942f), kx + 24 * s, y(966f)), 4 * s, 4 * s, fill)
+                    textC(Color.WHITE, 18 * s, latoBold); c.drawText(label, kx + 32 * s, y(961f), text)
+                    kx += 40 * s + text.measureText(label) + 24 * s
+                }
+            }
+            GuideTool.FACE -> {
+                presetRow(c, listOf(Item("Off", !engine.faceDetect) { engine.setFaceDetect(false) }, Item("On", engine.faceDetect) { engine.setFaceDetect(true) }),
+                    left, left + 360 * s, 925f, 982f)
+                textC(Color.argb(210, 255, 255, 255), 20 * s, lato)
+                c.drawText("Boxes on faces; with AF on AUTO, focus and exposure follow the largest face.", left + 400 * s, y(962f), text)
+            }
             GuideTool.ZEBRA -> {
-                val opts = FocusAids.ZEBRA_LEVELS
+                val opts = MonitorAids.ZEBRA_LEVELS
                 val cur = opts.indexOf(aids.zebra).let { if (it < 0) opts.indexOf("95") else it }
-                drawRulerRow(c, opts.map { z -> Item(FocusAids.zebraLabel(z), false) { setZebra(z) } }, cur, left, right, "ZEBRA")
+                drawRulerRow(c, opts.map { z -> Item(MonitorAids.zebraLabel(z), false) { setZebra(z) } }, cur, left, right, "ZEBRA")
                 chip(c, offR, "OFF", aids.zebra == null); buttons += Btn(offR) { setZebra(null) }
             }
             GuideTool.FRAME -> {
@@ -794,10 +1070,25 @@ class CameraHud(context: Context) : View(context) {
         invalidate()
     }
 
-    private fun setZebra(z: String?) { aids.zebra = z; prefs.zebra = z; invalidate() }
+    private fun setZebra(z: String?) { aids.zebra = z; prefs.zebra = z; z?.let { prefs.putStr("last_zebra", it) }; invalidate() }
 
     private fun drawGuideIcon(c: Canvas, t: GuideTool, cx: Float, cy: Float, color: Int) {
         when (t) {
+            GuideTool.FALSE -> {
+                val cols = intArrayOf(Color.rgb(122, 31, 160), Color.rgb(30, 91, 255), Color.rgb(47, 212, 74), Color.rgb(255, 230, 0), Color.rgb(255, 32, 32))
+                for (i in cols.indices) { fillC(cols[i]); c.drawRect(cx - 24 * s + i * 9.6f * s, cy - 15 * s, cx - 24 * s + (i + 1) * 9.6f * s, cy + 15 * s, fill) }
+                strokeC(color, 2.5f * s); c.drawRect(cx - 24 * s, cy - 15 * s, cx + 24 * s, cy + 15 * s, stroke)
+            }
+            GuideTool.FACE -> {
+                strokeC(color, 3 * s)
+                c.drawCircle(cx, cy - 6 * s, 9 * s, stroke)
+                c.drawArc(RectF(cx - 17 * s, cy + 6 * s, cx + 17 * s, cy + 30 * s), 200f, 140f, false, stroke)
+                val k = 8 * s
+                for ((ax, ay) in listOf(-1 to -1, 1 to -1, 1 to 1, -1 to 1)) {
+                    val px = cx + ax * 24 * s; val py = cy + ay * 19 * s
+                    c.drawLine(px, py, px - ax * k, py, stroke); c.drawLine(px, py, px, py - ay * k, stroke)
+                }
+            }
             GuideTool.FOCUS -> {
                 // a picture with a sharp mountain outline
                 strokeC(color, 3 * s); c.drawRoundRect(RectF(cx - 24 * s, cy - 17 * s, cx + 24 * s, cy + 17 * s), 5 * s, 5 * s, stroke)
@@ -838,7 +1129,7 @@ class CameraHud(context: Context) : View(context) {
     }
 
     // ---- tool column
-    private enum class Tool { GUIDES, AF, EXPOSURE, RECORD, LENS, STAB, FLIP }
+    private enum class Tool { GUIDES, AF, EXPOSURE, RECORD, LENS, LUT, FLIP }
     private val toolHit = HashMap<Tool, RectF>()
 
     private fun toolRect(t: Tool, cx: Float, cy: Float, r: Float) { toolHit[t] = RectF(cx - r, cy - r, cx + r, cy + r) }
@@ -865,8 +1156,8 @@ class CameraHud(context: Context) : View(context) {
         textC(Color.WHITE, 30 * u, lato)
         c.drawText(zoomLabel, cx + 63 * u - text.measureText(zoomLabel), 824 * u, text)
         toolRect(Tool.LENS, cx, ly, 50 * u)
-        drawBadgeButton(c, cx - 2 * u, 888 * u, "STAB", engine.stabilization)
-        toolRect(Tool.STAB, cx, 888 * u, 45 * u)
+        drawBadgeButton(c, cx - 2 * u, 888 * u, "LUT", prefs.lut != null || lutPanel)
+        toolRect(Tool.LUT, cx, 888 * u, 45 * u)
         drawFlipIcon(c, cx, 1013 * u)
         toolRect(Tool.FLIP, cx, 1013 * u, 50 * u)
     }
@@ -1043,7 +1334,12 @@ class CameraHud(context: Context) : View(context) {
         val px = e.x; val py = e.y
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                drag = null; dragSlider = null; dragging = false; downX = px
+                drag = null; dragSlider = null; dragging = false; downX = px; lutDown = false; fnDown = -1
+                fnRects.withIndex().firstOrNull { fnShown && prefs.functionButtons && it.value?.contains(px, py) == true }?.let {
+                    fnDown = it.index; fnLong = false
+                    postDelayed(fnLongPress, 600); return true
+                }
+                if (lutPanel && editorRect.contains(px, py)) { lutDown = true; lutDownScroll = lutScroll; return true }
                 toolHit.entries.firstOrNull { it.value.contains(px, py) }?.let { onTool(it.key); invalidate(); return true }
                 navHit.entries.firstOrNull { it.value.contains(px, py) }?.let { onNav(it.key); return true }
                 buttons.firstOrNull { it.rect.contains(px, py) }?.let { it.act(); invalidate(); return true }
@@ -1052,7 +1348,11 @@ class CameraHud(context: Context) : View(context) {
                 readoutHit.entries.firstOrNull { it.value.contains(px, py) }?.let {
                     select(if (selected == it.key) null else it.key); return true }
                 if (badgeRect.contains(px, py)) { onSettings("resolution"); return true }
-                if (leftHandle.contains(px, py) || rightHandle.contains(px, py)) { panelsOn = !panelsOn; collapse(); return true }
+                if (leftHandle.contains(px, py)) { sideMenu = !sideMenu; if (!sideMenu) presetsPanel = false; invalidate(); return true }
+                if (rightHandle.contains(px, py)) {
+                    if (prefs.functionButtons) fnShown = !fnShown else onSettings("fbuttons")
+                    invalidate(); return true
+                }
                 if (selected == null && !guidesOn && expanded == null && panelsOn) {
                     if (prefs.showHistogram && histRect.contains(px, py)) { expanded = Expanded.HISTOGRAM; invalidate(); return true }
                     if (prefs.showAudioMeters && audioRect.contains(px, py)) { expanded = Expanded.AUDIO; invalidate(); return true }
@@ -1062,14 +1362,19 @@ class CameraHud(context: Context) : View(context) {
                     if (expanded == Expanded.HISTOGRAM || !audioRect.contains(px, py) || py < y(865f)) { expanded = null; invalidate() }
                     return true
                 }
-                if (editorRect.contains(px, py) && (selected != null || guidesOn)) return true
+                if (editorRect.contains(px, py) && (selected != null || guidesOn || presetsPanel)) return true
                 if (pv.contains(px, py)) {
-                    if (selected != null || guidesOn || expanded != null) { collapse(); return true }
+                    if (selected != null || guidesOn || expanded != null || lutPanel || presetsPanel) { collapse(); return true }
                     val fx = ((px - pv.left) / pv.width()).coerceIn(0f, 1f); val fy = ((py - pv.top) / pv.height()).coerceIn(0f, 1f)
                     engine.tapFocus(fx, fy); showFocusReticle(fx, fy); onParamChanged(null)
                 }
             }
             MotionEvent.ACTION_MOVE -> {
+                if (lutDown) {
+                    if (abs(px - downX) > 12 * s) dragging = true
+                    if (dragging) { lutScroll = lutDownScroll + (px - downX); invalidate() }
+                    return true
+                }
                 dragSlider?.let { slide(it, px); return true }
                 val d = drag ?: return true
                 if (abs(px - downX) > 12 * s) dragging = true
@@ -1079,6 +1384,16 @@ class CameraHud(context: Context) : View(context) {
                 drag = RulerHit(d.rect, d.items, idx, d.cx, d.spacing); downX = px
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (fnDown >= 0) {
+                    removeCallbacks(fnLongPress)
+                    if (!fnLong && e.actionMasked == MotionEvent.ACTION_UP) runFn(prefs.fn(fnDown))
+                    fnDown = -1; return true
+                }
+                if (lutDown) {
+                    if (!dragging && e.actionMasked == MotionEvent.ACTION_UP)
+                        lutCards.firstOrNull { it.first.contains(px, py) }?.let { (_, n) -> n?.let { prefs.putStr("last_lut", it) }; onLutChanged(n) }
+                    lutDown = false; dragging = false; invalidate(); return true
+                }
                 val d = drag
                 if (d != null && !dragging && e.actionMasked == MotionEvent.ACTION_UP) {
                     // tap an item on the ruler to jump to it
@@ -1097,8 +1412,14 @@ class CameraHud(context: Context) : View(context) {
         sl.set(pct)
     }
 
-    private fun select(p: P?) { selected = p; guidesOn = false; expanded = null; invalidate() }
-    private fun collapse() { selected = null; guidesOn = false; expanded = null; invalidate() }
+    private var lutDown = false
+    private var lutDownScroll = 0f
+    private var fnDown = -1
+    private var fnLong = false
+    private val fnLongPress = Runnable { if (fnDown >= 0) { fnLong = true; onSettings("fbuttons") } }
+
+    private fun select(p: P?) { collapse(); selected = p; invalidate() }
+    private fun collapse() { selected = null; guidesOn = false; expanded = null; lutPanel = false; presetsPanel = false; invalidate() }
 
     private fun onTool(t: Tool) {
         when (t) {
@@ -1107,7 +1428,7 @@ class CameraHud(context: Context) : View(context) {
             Tool.EXPOSURE -> select(if (selected == P.EV) null else P.EV)
             Tool.RECORD -> onRecordToggle()
             Tool.LENS -> select(if (selected == P.LENS) null else P.LENS)
-            Tool.STAB -> { engine.stabilization = !engine.stabilization; changed() }
+            Tool.LUT -> { val open = !lutPanel; collapse(); lutPanel = open }
             Tool.FLIP -> {
                 val target = if (engine.isFront) engine.lenses.firstOrNull { it.type == CameraEngine.LENS_MAIN }
                              else engine.lenses.firstOrNull { it.type == CameraEngine.LENS_FRONT }
@@ -1134,6 +1455,16 @@ class CameraHud(context: Context) : View(context) {
             -3f to 0.802f, 0f to 0.912f, 3f to 1f)
         val GUIDE_RATIOS = linkedMapOf("2.76:1" to 2.76f, "2.4:1" to 2.4f, "2.39:1" to 2.39f, "2.35:1" to 2.35f,
             "2:1" to 2f, "1.85:1" to 1.85f, "16:9" to 16f / 9, "14:9" to 14f / 9, "4:3" to 4f / 3, "1:1" to 1f)
+        val TIMELAPSE_SECS = listOf(1, 2, 3, 5, 10, 15, 30, 60, 120, 300, 600)
+        /** Function-button actions: id to the name shown in Settings. */
+        val FN_ACTIONS = linkedMapOf("NONE" to "None", "RECORD" to "Record", "TORCH" to "Torch", "FOCUS" to "Focus Assist",
+            "ZEBRA" to "Zebra", "FALSE" to "False Color", "FACE" to "Face Detection", "LUT" to "Display LUT",
+            "GUIDES" to "Frame Guides", "GRID" to "Grid", "STAB" to "Stabilization", "AE" to "Auto Exposure",
+            "AELOCK" to "Exposure Lock", "AWBLOCK" to "White Balance Lock", "FLIP" to "Flip Camera", "GOOD" to "Good Take",
+            "CLEAN" to "Clean Feed")
+        val FN_SHORT = mapOf("RECORD" to "REC", "TORCH" to "TORCH", "FOCUS" to "PEAK", "ZEBRA" to "ZEBRA", "FALSE" to "FALSE",
+            "FACE" to "FACE", "LUT" to "LUT", "GUIDES" to "GUIDE", "GRID" to "GRID", "STAB" to "STAB", "AE" to "AUTO",
+            "AELOCK" to "AE LK", "AWBLOCK" to "WB LK", "FLIP" to "FLIP", "GOOD" to "GOOD", "CLEAN" to "CLEAN")
         val WB_PRESETS = listOf("Cloudy" to 6500, "Shade" to 7500, "Fluorescent" to 4000, "Tungsten" to 3200, "Daylight" to 5600)
     }
 }

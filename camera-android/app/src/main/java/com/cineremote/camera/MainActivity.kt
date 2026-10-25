@@ -38,7 +38,9 @@ class MainActivity : Activity(), RemoteServer.Listener {
     private lateinit var audio: AudioInput
     private var server: RemoteServer? = null
     private lateinit var tap: FrameTap
-    private lateinit var aids: FocusAids
+    private lateinit var aids: MonitorAids
+    private lateinit var slate: Slate
+    private lateinit var presets: Presets
     private var session: ControllerSession? = null
 
     private val ui = Handler(Looper.getMainLooper())
@@ -91,8 +93,10 @@ class MainActivity : Activity(), RemoteServer.Listener {
             override fun onCameraError(message: String) { ui.post { toast(message) } }
         })
         audio = AudioInput(prefs)
-        takes = Takes(engine, recorder, audio, prefs) {
-            ui.post { session?.emitChanged(setOf("recording_state", "active_storage")); hud.invalidate() }
+        slate = Slate(prefs)
+        presets = Presets(prefs)
+        takes = Takes(engine, recorder, audio, prefs, slate) {
+            ui.post { session?.emitChanged(setOf("recording_state", "active_storage", "slate")); hud.invalidate() }
         }
         trackDisplayRotation()
         // The camera renders only into the frame tap, which feeds the on-screen preview, the stream and the
@@ -100,7 +104,8 @@ class MainActivity : Activity(), RemoteServer.Listener {
         // S20 drops to ~26 fps with three; with two it holds 30.
         tap = FrameTap(this) { engine.streamTransform() }
         // zebras and focus assist are drawn by the preview renderer's shader: on screen only
-        aids = FocusAids(prefs)
+        aids = MonitorAids(prefs)
+        aids.lut = prefs.lut?.let { Luts.load(this, it) }
         preview.init(tap.egl.eglBaseContext, null, org.webrtc.EglBase.CONFIG_PLAIN, aids.drawer())
         preview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         tap.previewSink = preview
@@ -119,6 +124,11 @@ class MainActivity : Activity(), RemoteServer.Listener {
         hud.prefs = prefs
         hud.audio = audio
         hud.aids = aids
+        hud.slate = slate
+        hud.presets = presets
+        hud.smallFrame = { tap.thumb }
+        hud.onLutChanged = { name -> setLut(name) }
+        hud.onGoodTake = { good -> setGoodTake(good) }
         hud.histogram = { tap.histogram }
         hud.plannedBitrate = { takes.config().bitrate }
         hud.onRecordToggle = { toggleRecord() }
@@ -171,9 +181,10 @@ class MainActivity : Activity(), RemoteServer.Listener {
 
     override fun onControllerAuthorized(link: RemoteServer.SignalingLink, controllerInfo: JSONObject): Boolean {
         if (session != null) return false
-        val s = ControllerSession(this, link, engine, recorder, takes, prefs, tap, audio, ::batteryPct) { done ->
+        val s = ControllerSession(this, link, engine, recorder, takes, slate, prefs, tap, audio, ::batteryPct) { done ->
             ui.post { if (session === done) { session = null; hud.connected = false; hud.invalidate() } }
         }
+        s.controller.onGoodTake = { good -> ui.post { setGoodTake(good) } }
         s.onIdentify = { ui.post { flashScreen() } }
         session = s
         ui.post { s.start(); hud.connected = true; hud.invalidate() }
@@ -192,6 +203,44 @@ class MainActivity : Activity(), RemoteServer.Listener {
     private fun toggleRecord() {
         if (!takes.toggle()) toast("Couldn't start recording")
         hud.invalidate()
+    }
+
+    /** Display LUT (monitoring only): null turns it off. */
+    private fun setLut(name: String?) {
+        prefs.lut = name
+        name?.let { prefs.putStr("last_lut", it) }
+        aids.lut = name?.let { Luts.load(this, it) }
+        if (name != null && aids.lut == null) toast("Couldn't load LUT \"$name\"")
+        hud.invalidate()
+    }
+
+    /** Mark the last clip good (or not): its description, the slate, and CineRemote. */
+    private fun setGoodTake(good: Boolean) {
+        Thread { slate.markLastGood(this, good); ui.post { session?.emitChanged(setOf("slate")); hud.invalidate() } }.start()
+    }
+
+    private fun importLut() {
+        val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        runCatching { startActivityForResult(pick, REQ_LUT) }.onFailure { toast("No file picker available") }
+    }
+
+    @Deprecated("Activity result API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode != REQ_LUT || resultCode != RESULT_OK || uri == null) return
+        Thread {
+            val name = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null } ?: "LUT.cube"
+            val text = runCatching {
+                contentResolver.openInputStream(uri)?.use { it.readBytes().takeIf { b -> b.size < 20_000_000 }?.toString(Charsets.UTF_8) }
+            }.getOrNull()
+            val stored = text?.let { Luts.import(this, name, it) }
+            ui.post {
+                if (stored == null) toast("\"$name\" isn't a 3D .cube LUT") else { toast("Imported \"$stored\""); setLut(stored) }
+                settings?.show("luts")
+            }
+        }.start()
     }
 
     private fun setGain(percent: Int) {
@@ -219,14 +268,27 @@ class MainActivity : Activity(), RemoteServer.Listener {
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            if (started) { hud.battery = (batteryPct() * 100).toInt(); hud.invalidate(); session?.emitHousekeeping() }
+            if (started) { hud.battery = (batteryPct() * 100).toInt(); hud.invalidate(); session?.emitHousekeeping(); checkHighSpeed() }
             ui.postDelayed(this, if (recorder.isRecording) 200 else 1000)
         }
     }
 
+    /** Some advertised high-speed rates run but deliver black frames (240 fps on the S20 FE). A black picture
+     *  with a near-zero exposure time (a dark scene does the opposite) for 2 s means the rate doesn't work. */
+    private var blackSecs = 0
+    private fun checkHighSpeed() {
+        if (!engine.highSpeed || takes.active) { blackSecs = 0; return }
+        val px = tap.thumb ?: return
+        var sum = 0L
+        for (p in px) sum += ((p shr 16) and 0xFF) + ((p shr 8) and 0xFF) + (p and 0xFF)
+        val mean = sum / (px.size * 3f)
+        blackSecs = if (mean < 4f && engine.liveExposureNs in 1..200_000L) blackSecs + 1 else 0
+        if (blackSecs >= 2) { blackSecs = 0; engine.markHighSpeedFailed(engine.offSpeedFps) }
+    }
+
     // ------------------------------------------------------------------ settings
     private fun openSettings(page: String?) {
-        val panel = settings ?: SettingsPanel(this, prefs, engine, aids, object : SettingsPanel.Host {
+        val panel = settings ?: SettingsPanel(this, prefs, engine, aids, slate, object : SettingsPanel.Host {
             override fun isRecording() = takes.active
             override fun onFormatChanged() { ui.postDelayed({ session?.emitChanged(setOf("recording_format", "cam_framerate", "cam_frame_rate_range")); hud.invalidate() }, 300) }
             override fun onAudioGainChanged(percent: Int) = setGain(percent)
@@ -235,6 +297,10 @@ class MainActivity : Activity(), RemoteServer.Listener {
                 hud.invalidate()
             }
             override fun onMonitorChanged() { hud.invalidate() }
+            override fun onLutChanged(name: String?) = setLut(name)
+            override fun importLut() = this@MainActivity.importLut()
+            override fun onSlateChanged() { session?.emitChanged(setOf("slate")); hud.invalidate() }
+            override fun onGoodTake(good: Boolean) = setGoodTake(good)
             override fun onClose() = closeSettings()
         }).also { p ->
             // covers the camera area; the nav rail stays visible (Camera closes settings)
@@ -315,6 +381,8 @@ class MainActivity : Activity(), RemoteServer.Listener {
         root.addView(permNote, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         setContentView(root)
     }
+
+    companion object { const val REQ_LUT = 7 }
 
     override fun onDestroy() {
         super.onDestroy()

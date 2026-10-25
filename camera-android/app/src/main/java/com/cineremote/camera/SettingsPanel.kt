@@ -24,8 +24,8 @@ import android.widget.Toast
  * (value + chevron, switch, slider, or a check-marked choice list on a sub-page). It writes [prefs] and tells
  * [host] about changes that need action. Only settings this app actually implements are listed.
  */
-class SettingsPanel(context: Context, private val prefs: Prefs, private val engine: CameraEngine, private val aids: FocusAids,
-                    private val host: Host) : FrameLayout(context) {
+class SettingsPanel(context: Context, private val prefs: Prefs, private val engine: CameraEngine, private val aids: MonitorAids,
+                    private val slate: Slate, private val host: Host) : FrameLayout(context) {
 
     interface Host {
         fun isRecording(): Boolean
@@ -33,6 +33,10 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         fun onAudioGainChanged(percent: Int)
         fun onRemoteChanged()
         fun onMonitorChanged()
+        fun onLutChanged(name: String?)
+        fun importLut()
+        fun onSlateChanged()
+        fun onGoodTake(good: Boolean)
         fun onClose()
     }
 
@@ -81,12 +85,27 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
                 aids.focusAssist = it > 0; prefs.focusAssist = it > 0
                 if (it > 0) { aids.peakStyle = it == 2; prefs.focusAssistPeak = it == 2 }
                 host.onMonitorChanged() }
-            "focuscolor" -> FocusAids.COLORS.keys.toList().let { names ->
+            "focuscolor" -> MonitorAids.COLORS.keys.toList().let { names ->
                 choicePage("Monitor", "FOCUS ASSIST COLOR", names, names.indexOf(aids.color)) {
                     aids.color = names[it]; prefs.focusAssistColor = names[it]; host.onMonitorChanged() } }
-            "zebra" -> (listOf<String?>(null) + FocusAids.ZEBRA_LEVELS).let { levels ->
-                choicePage("Monitor", "ZEBRA", levels.map { it?.let(FocusAids::zebraLabel) ?: "Off" }, levels.indexOf(aids.zebra)) {
+            "zebra" -> (listOf<String?>(null) + MonitorAids.ZEBRA_LEVELS).let { levels ->
+                choicePage("Monitor", "ZEBRA", levels.map { it?.let(MonitorAids::zebraLabel) ?: "Off" }, levels.indexOf(aids.zebra)) {
                     aids.zebra = levels[it]; prefs.zebra = levels[it]; host.onMonitorChanged() } }
+            "timelapse" -> choicePage("Record", "CAPTURE 1 FRAME EVERY", CameraHud.TIMELAPSE_SECS.map { secsLabel(it) },
+                CameraHud.TIMELAPSE_SECS.indexOf(prefs.timelapseSecs)) { prefs.timelapseSecs = CameraHud.TIMELAPSE_SECS[it]; host.onMonitorChanged() }
+            "lut" -> (listOf<String?>(null) + Luts.names(context)).let { names ->
+                choicePage("LUTs", "DISPLAY LUT", names.map { it ?: "Off" }, names.indexOf(prefs.lut)) { host.onLutChanged(names[it]) } }
+            "luts" -> lutsPage()
+            "fbuttons" -> fnPage()
+            "fn0", "fn1", "fn2" -> p.last().digitToInt().let { i ->
+                val ids = CameraHud.FN_ACTIONS.keys.toList()
+                choicePage("Function Buttons", "F${i + 1}", ids.map { CameraHud.FN_ACTIONS.getValue(it) }, ids.indexOf(prefs.fn(i))) {
+                    prefs.setFn(i, ids[it]); host.onMonitorChanged() } }
+            "slate" -> slatePage()
+            "light" -> choicePage("Slate", "INTERIOR / EXTERIOR", listOf("Not set", "Interior", "Exterior"), slate.light) {
+                slate.light = it; host.onSlateChanged() }
+            "tod" -> choicePage("Slate", "DAY / NIGHT", listOf("Not set", "Day", "Night"), slate.timeOfDay) {
+                slate.timeOfDay = it; host.onSlateChanged() }
             "guides" -> choicePage("Monitor", "GUIDES OPACITY", OPACITIES.map { "$it%" }, OPACITIES.indexOf(prefs.guidesOpacity)) {
                 prefs.guidesOpacity = OPACITIES[it]; host.onMonitorChanged() }
             "grids" -> choicePage("Monitor", "GRIDS OPACITY", OPACITIES.map { "$it%" }, OPACITIES.indexOf(prefs.gridsOpacity)) {
@@ -96,7 +115,14 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         scroll.scrollTo(0, 0)
     }
 
-    private fun parentOf(p: String) = "root"
+    private fun parentOf(p: String) = when (p) {
+        "fn0", "fn1", "fn2" -> "fbuttons"; "light", "tod" -> "slate"; else -> "root"
+    }
+
+    private fun secsLabel(secs: Int) = when {
+        secs >= 60 && secs % 60 == 0 -> "${secs / 60} minute${if (secs > 60) "s" else ""}"
+        else -> "$secs second${if (secs > 1) "s" else ""}"
+    }
 
     // ------------------------------------------------------------------ pages
     private fun rootPage() {
@@ -107,13 +133,18 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
             nav("Codec", if (prefs.hevc) "HEVC (H.265)" else "H.264") { show("codec") },
             nav("Resolution", "${Formats.BUCKETS.first { it.first == f.bucket }.second}  ${f.label}") { show("resolution") },
             nav("Bit Rate", "${Formats.tierName(prefs.bitrateTier)} (${Formats.bitrate(f, engine.fps, prefs.hevc, prefs.bitrateTier) / 1_000_000}Mbps)") { show("codec") },
+            switch("Timelapse Recording", prefs.timelapse) { prefs.timelapse = it; if (it) engine.setOffSpeed(false); host.onMonitorChanged() },
+            nav("Capture 1 Frame Every", secsLabel(prefs.timelapseSecs)) { show("timelapse") },
         )
         section("CAMERA")
         cardOf(
             switch("Lock White Balance on Record", prefs.lockWbOnRecord) { prefs.lockWbOnRecord = it },
             switch("Use Volume Button to Trigger Record", prefs.volumeKeyRecords) { prefs.volumeKeyRecords = it },
             switch("Video Stabilization", engine.stabilization) { engine.stabilization = it; engine.apply() },
+            *(if (engine.faceDetectSupported) arrayOf(switch("Face Detection", engine.faceDetect) { engine.setFaceDetect(it); host.onMonitorChanged() }) else emptyArray()),
         )
+        section("SLATE")
+        cardOf(nav("Slate", "Scene ${slate.scene}  ·  Take ${slate.take}") { show("slate") })
         section("AUDIO")
         cardOf(
             slider("Audio Gain", prefs.audioGain) { prefs.audioGain = it; host.onAudioGainChanged(it) },
@@ -123,7 +154,7 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         cardOf(
             nav("Focus Assist", if (!aids.focusAssist) "Off" else if (aids.peakStyle) "Peak" else "Colored Lines") { show("focus") },
             nav("Focus Assist Color", aids.color) { show("focuscolor") },
-            nav("Zebra", aids.zebra?.let(FocusAids::zebraLabel) ?: "Off") { show("zebra") },
+            nav("Zebra", aids.zebra?.let(MonitorAids::zebraLabel) ?: "Off") { show("zebra") },
             nav("Guides Opacity", "${prefs.guidesOpacity}%") { show("guides") },
             nav("Grids Opacity", "${prefs.gridsOpacity}%") { show("grids") },
             switch("Display Audio Meters", prefs.showAudioMeters) { prefs.showAudioMeters = it; host.onMonitorChanged() },
@@ -131,6 +162,13 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
             switch("Display Storage Status", prefs.showStorage) { prefs.showStorage = it; host.onMonitorChanged() },
             switch("Display Battery Indicator", prefs.showBattery) { prefs.showBattery = it; host.onMonitorChanged() },
         )
+        section("LUTS")
+        cardOf(
+            nav("Display LUT", prefs.lut ?: "Off") { show("lut") },
+            nav("LUTs Manager", "${Luts.names(context).size}") { show("luts") },
+        )
+        section("FUNCTION BUTTONS")
+        cardOf(nav("Function Buttons", if (prefs.functionButtons) "On" else "Off") { show("fbuttons") })
         section("REMOTE CAMERA CONTROL")
         cardOf(
             switch("Remote Camera Control", prefs.remoteEnabled) { prefs.remoteEnabled = it; host.onRemoteChanged() },
@@ -196,6 +234,74 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         if (!host.isRecording()) return false
         Toast.makeText(context, "Stop recording to change the format", Toast.LENGTH_SHORT).show()
         return true
+    }
+
+    private fun lutsPage() {
+        title.text = "LUTs"
+        section("BUILT IN")
+        cardOf(*Luts.BUILT_IN.map { n -> choice(n, null, prefs.lut == n) { host.onLutChanged(n); show("luts") } }.toTypedArray())
+        section("IMPORTED")
+        val imported = Luts.imported(context)
+        val rows = imported.map { n ->
+            row(n).first.apply {
+                addView(TextView(context).apply {
+                    text = if (prefs.lut == n) "In use   " else ""; setTextColor(accent); typeface = lato; setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) })
+                addView(TextView(context).apply {
+                    text = "Delete"; setTextColor(Color.rgb(255, 90, 80)); typeface = latoBold; setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    setPadding(dp(12f), dp(8f), dp(4f), dp(8f))
+                    setOnClickListener { if (prefs.lut == n) host.onLutChanged(null); Luts.delete(context, n); show("luts") }
+                })
+                setOnClickListener { host.onLutChanged(n); show("luts") }
+            }
+        }
+        cardOf(*(rows + nav("Import LUT (.cube)…", "") { host.importLut() }).toTypedArray())
+        note("Display LUTs colour the phone's screen only; recordings and the CineRemote stream stay ungraded. Import 3D LUTs in .cube format (up to 65 points).")
+    }
+
+    private fun fnPage() {
+        title.text = "Function Buttons"
+        section("FUNCTION BUTTONS")
+        cardOf(
+            switch("Function Buttons", prefs.functionButtons) { prefs.functionButtons = it; host.onMonitorChanged() },
+            *(0..2).map { i -> nav("F${i + 1}", CameraHud.FN_ACTIONS[prefs.fn(i)] ?: "None") { show("fn$i") } }.toTypedArray(),
+        )
+        note("Tap the dots on the picture's right edge to show F1–F3. Long-press a button to change what it does.")
+    }
+
+    private fun slatePage() {
+        title.text = "Slate"
+        section("CLIP")
+        cardOf(
+            stepper("Reel", slate.reel) { slate.reel = it; host.onSlateChanged() },
+            edit("Scene", slate.scene, false) { slate.scene = it; host.onSlateChanged() },
+            stepper("Take", slate.take) { slate.take = it; host.onSlateChanged() },
+            switch("Auto-Increment Take", slate.autoIncrement) { slate.autoIncrement = it; host.onSlateChanged() },
+            nav("Interior / Exterior", listOf("Not set", "Interior", "Exterior")[slate.light.coerceIn(0, 2)]) { show("light") },
+            nav("Day / Night", listOf("Not set", "Day", "Night")[slate.timeOfDay.coerceIn(0, 2)]) { show("tod") },
+            switch("Good Take (last clip)", slate.goodTake) { host.onGoodTake(it) },
+        )
+        section("PROJECT")
+        cardOf(
+            edit("Production", slate.production, false) { slate.production = it; host.onSlateChanged() },
+            edit("Director", slate.director, false) { slate.director = it; host.onSlateChanged() },
+            edit("Camera Operator", slate.operator, false) { slate.operator = it; host.onSlateChanged() },
+            stepper("Clip Number", slate.clip) { slate.clip = it; host.onSlateChanged() },
+        )
+        note("Next clip: ${slate.nextFileName()}\n${slate.describe()}")
+    }
+
+    /** A number with − / + buttons. */
+    private fun stepper(label: String, value: Int, onChange: (Int) -> Unit): View {
+        val (r, _) = row(label)
+        fun btn(t: String, d: Int) = TextView(context).apply {
+            text = t; setTextColor(accent); typeface = latoBold; setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+            gravity = Gravity.CENTER; setPadding(dp(14f), 0, dp(14f), 0)
+            setOnClickListener { onChange((value + d).coerceIn(1, 999)); show(page) }
+        }
+        r.addView(btn("−", -1))
+        r.addView(valueText("$value").apply { setTextColor(Color.WHITE); minWidth = dp(44f); gravity = Gravity.CENTER })
+        r.addView(btn("+", 1))
+        return r
     }
 
     private fun choicePage(t: String, heading: String, options: List<String>, cur: Int, pick: (Int) -> Unit) {

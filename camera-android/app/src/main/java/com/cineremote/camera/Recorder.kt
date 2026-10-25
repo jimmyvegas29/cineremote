@@ -26,10 +26,19 @@ import java.util.Locale
  * threads. Both are stamped on the monotonic clock (the camera service converts frame timestamps to it for
  * video encoders, even where the camera itself reports boot time), so they line up; the file starts at the
  * first video frame.
+ *
+ * Off-speed takes stretch the video timestamps (sensor rate / project rate) so they play back as slow
+ * motion; timelapse takes space their sparse frames one project frame apart. Both are picture-only.
  */
 class Recorder(private val context: Context) {
     data class Config(val width: Int, val height: Int, val fps: Int, val hevc: Boolean, val bitrate: Int,
-                      val rotation: Int, val stereo: Boolean)
+                      val rotation: Int, val stereo: Boolean,
+                      /** Rate frames arrive at (the sensor rate; above [fps] when off-speed). */
+                      val captureFps: Int = fps,
+                      val timelapse: Boolean = false,
+                      val fileName: String = "", val description: String = "") {
+        val audio get() = !timelapse && captureFps == fps
+    }
 
     private var video: MediaCodec? = null
     private var audio: MediaCodec? = null
@@ -45,6 +54,12 @@ class Recorder(private val context: Context) {
     @Volatile var lastClipSecs = -1.0
         private set
     val isRecording get() = startWallMs > 0
+    /** Video frames written so far in this take (timelapse shows the clip length from this). */
+    @Volatile var framesWritten = 0L
+        private set
+    /** The finished clip (for the slate's Good Take). */
+    @Volatile var lastUri: Uri? = null
+        private set
     /** Size and bit rate of the take in progress (or the last one). */
     @Volatile var current: Config? = null
         private set
@@ -64,9 +79,10 @@ class Recorder(private val context: Context) {
     /** Create the encoders and the file; returns the surface the camera must target before [start]. */
     fun prepare(c: Config): Surface? {
         release()
-        val name = "CineRemote_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
+        val name = c.fileName.ifBlank { "CineRemote_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4" }
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            if (c.description.isNotBlank()) put(MediaStore.Video.Media.DESCRIPTION, c.description)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
             put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CineRemote")
             put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -80,7 +96,12 @@ class Recorder(private val context: Context) {
             val vf = MediaFormat.createVideoFormat(mime, c.width, c.height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, c.bitrate)
-                setInteger(MediaFormat.KEY_FRAME_RATE, c.fps)
+                setInteger(MediaFormat.KEY_FRAME_RATE, c.captureFps)
+                if (c.captureFps > 60) {
+                    // high-speed takes: ask for a real-time encoder clocked for the full rate, or it falls behind
+                    setInteger(MediaFormat.KEY_OPERATING_RATE, c.captureFps)
+                    setInteger(MediaFormat.KEY_PRIORITY, 0)
+                }
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             }
             video = MediaCodec.createEncoderByType(mime).apply {
@@ -93,12 +114,13 @@ class Recorder(private val context: Context) {
                 setInteger(MediaFormat.KEY_BIT_RATE, if (c.stereo) 256_000 else 128_000)
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
             }
-            audio = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
+            audio = if (!c.audio) null else MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
                 configure(af, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             }
             muxer = MediaMuxer(fd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply { setOrientationHint(c.rotation) }
             cfg = c
-            Log.i(TAG, "prepared $name ${c.width}x${c.height}@${c.fps} ${if (c.hevc) "HEVC" else "H.264"} ${c.bitrate / 1_000_000} Mb/s")
+            Log.i(TAG, "prepared $name ${c.width}x${c.height}@${c.captureFps}/${c.fps} ${if (c.hevc) "HEVC" else "H.264"} " +
+                "${c.bitrate / 1_000_000} Mb/s${if (c.timelapse) " timelapse" else ""}")
             inputSurface
         } catch (e: Exception) {
             Log.e(TAG, "prepare recording", e)
@@ -111,15 +133,15 @@ class Recorder(private val context: Context) {
     /** Begin encoding (call once the camera is targeting [inputSurface]). */
     fun start(): Boolean {
         val v = video ?: return false
-        val a = audio ?: return false
+        val a = audio
         return try {
             synchronized(lock) {
                 videoTrack = -1; audioTrack = -1; muxerStarted = false; firstVideoUs = -1
-                lastPts.fill(-1); pending.clear()
+                lastPts.fill(-1); pending.clear(); framesWritten = 0
             }
-            v.start(); a.start()
+            v.start(); a?.start()
             accepting = true
-            drains = listOf(Thread({ drain(v, true) }, "rec-video"), Thread({ drain(a, false) }, "rec-audio")).onEach { it.start() }
+            drains = listOfNotNull(Thread({ drain(v, true) }, "rec-video"), a?.let { Thread({ drain(it, false) }, "rec-audio") }).onEach { it.start() }
             current = cfg
             startWallMs = System.currentTimeMillis()
             true
@@ -174,6 +196,12 @@ class Recorder(private val context: Context) {
         if (isVideo && firstVideoUs < 0) firstVideoUs = pts
         if (firstVideoUs < 0 || pts < firstVideoUs) return          // audio from before the first frame
         pts -= firstVideoUs
+        val c = cfg
+        if (isVideo && c != null) {
+            if (c.timelapse) pts = framesWritten * 1_000_000L / c.fps                       // one project frame apart
+            else if (c.captureFps != c.fps) pts = pts * c.captureFps / c.fps                // off-speed: slow motion
+            framesWritten++
+        }
         val t = if (isVideo) 0 else 1
         if (pts <= lastPts[t]) pts = lastPts[t] + 1                 // the muxer wants rising timestamps
         lastPts[t] = pts
@@ -190,7 +218,7 @@ class Recorder(private val context: Context) {
 
     private fun maybeStartMuxer(force: Boolean = false) {
         val m = muxer ?: return
-        if (muxerStarted || videoTrack < 0 || (audioTrack < 0 && !force)) return
+        if (muxerStarted || videoTrack < 0 || (audioTrack < 0 && audio != null && !force)) return
         m.start()
         muxerStarted = true
         for (p in pending) {
@@ -217,6 +245,7 @@ class Recorder(private val context: Context) {
         }
         lastClipSecs = if (started > 0) (System.currentTimeMillis() - started) / 1000.0 else 0.0
         startWallMs = 0
+        lastUri = if (ok) uri else null
         release()
         if (ok) finishFile() else discardFile()
     }

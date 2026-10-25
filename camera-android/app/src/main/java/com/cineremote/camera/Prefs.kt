@@ -102,6 +102,44 @@ class Prefs(context: Context) {
         get() = sp.getString("focus_assist_color", null) ?: "Red"
         set(v) = sp.edit().putString("focus_assist_color", v).apply()
 
+    var faceDetect: Boolean
+        get() = sp.getBoolean("face_detect", false)
+        set(v) = sp.edit().putBoolean("face_detect", v).apply()
+    /** Display LUT name, or null for none. */
+    var lut: String?
+        get() = sp.getString("lut", null)
+        set(v) = sp.edit().putString("lut", v).apply()
+
+    // ---- off-speed / timelapse
+    var offSpeedFps: Int
+        get() = sp.getInt("off_speed_fps", 60)
+        set(v) = sp.edit().putInt("off_speed_fps", v).apply()
+    var timelapse: Boolean
+        get() = sp.getBoolean("timelapse", false)
+        set(v) = sp.edit().putBoolean("timelapse", v).apply()
+    /** Timelapse: capture one frame every this many seconds. */
+    var timelapseSecs: Int
+        get() = sp.getInt("timelapse_secs", 2)
+        set(v) = sp.edit().putInt("timelapse_secs", v).apply()
+
+    // ---- function buttons
+    var functionButtons: Boolean
+        get() = sp.getBoolean("function_buttons", true)
+        set(v) = sp.edit().putBoolean("function_buttons", v).apply()
+    fun fn(i: Int): String = sp.getString("fn$i", null) ?: listOf("FOCUS", "ZEBRA", "FALSE")[i.coerceIn(0, 2)]
+    fun setFn(i: Int, action: String) = sp.edit().putString("fn$i", action).apply()
+
+    // ---- presets (JSON array) and slate
+    var presets: String
+        get() = sp.getString("presets", null) ?: "[]"
+        set(v) = sp.edit().putString("presets", v).apply()
+    fun str(key: String, def: String = "") = sp.getString(key, null) ?: def
+    fun putStr(key: String, v: String) = sp.edit().putString(key, v).apply()
+    fun int(key: String, def: Int) = sp.getInt(key, def)
+    fun putInt(key: String, v: Int) = sp.edit().putInt(key, v).apply()
+    fun bool(key: String, def: Boolean) = sp.getBoolean(key, def)
+    fun putBool(key: String, v: Boolean) = sp.edit().putBoolean(key, v).apply()
+
     // ---- remote
     var remoteEnabled: Boolean
         get() = sp.getBoolean("remote_enabled", true)
