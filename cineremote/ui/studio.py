@@ -523,7 +523,7 @@ class Deck(QWidget):
         g = self.rec_grid
         for w in (self.tc, self.rec_btn, self.media):
             g.removeWidget(w)
-        for i in range(3):
+        for i in range(4):
             g.setRowStretch(i, 0)
             g.setColumnStretch(i, 0)
         if open_:
@@ -541,10 +541,12 @@ class Deck(QWidget):
             self.media.setFont(T.num_font(11, QFont.Medium))
             self.tc.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
             self.media.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-            g.addWidget(self.rec_btn, 0, 0, 2, 1, Qt.AlignCenter)
-            g.addWidget(self.tc, 0, 1)
-            g.addWidget(self.media, 1, 1)
-            g.setColumnStretch(1, 1)
+            # button + text as one group, centred in the box (empty stretch columns either side)
+            g.addWidget(self.rec_btn, 0, 1, 2, 1, Qt.AlignCenter)
+            g.addWidget(self.tc, 0, 2)
+            g.addWidget(self.media, 1, 2)
+            g.setColumnStretch(0, 1)
+            g.setColumnStretch(3, 1)
         self.refresh()
 
     def _ruler(self, v, final):
