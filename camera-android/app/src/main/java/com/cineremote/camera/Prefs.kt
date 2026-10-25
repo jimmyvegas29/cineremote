@@ -87,6 +87,21 @@ class Prefs(context: Context) {
         get() = sp.getInt("grids_opacity", 50)
         set(v) = sp.edit().putInt("grids_opacity", v).apply()
 
+    /** Zebra level ("MG", "MG+1", "75".."100") or null for off. */
+    var zebra: String?
+        get() = sp.getString("zebra", null)
+        set(v) = sp.edit().putString("zebra", v).apply()
+    var focusAssist: Boolean
+        get() = sp.getBoolean("focus_assist", false)
+        set(v) = sp.edit().putBoolean("focus_assist", v).apply()
+    /** Focus assist style: true = Peak, false = Colored Lines. */
+    var focusAssistPeak: Boolean
+        get() = sp.getBoolean("focus_assist_peak", false)
+        set(v) = sp.edit().putBoolean("focus_assist_peak", v).apply()
+    var focusAssistColor: String
+        get() = sp.getString("focus_assist_color", null) ?: "Red"
+        set(v) = sp.edit().putString("focus_assist_color", v).apply()
+
     // ---- remote
     var remoteEnabled: Boolean
         get() = sp.getBoolean("remote_enabled", true)

@@ -38,6 +38,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
     private lateinit var audio: AudioInput
     private var server: RemoteServer? = null
     private lateinit var tap: FrameTap
+    private lateinit var aids: FocusAids
     private var session: ControllerSession? = null
 
     private val ui = Handler(Looper.getMainLooper())
@@ -98,7 +99,9 @@ class MainActivity : Activity(), RemoteServer.Listener {
         // histogram. A separate preview output would make three camera streams while recording, and the
         // S20 drops to ~26 fps with three; with two it holds 30.
         tap = FrameTap(this) { engine.streamTransform() }
-        preview.init(tap.egl.eglBaseContext, null)
+        // zebras and focus assist are drawn by the preview renderer's shader: on screen only
+        aids = FocusAids(prefs)
+        preview.init(tap.egl.eglBaseContext, null, org.webrtc.EglBase.CONFIG_PLAIN, aids.drawer())
         preview.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
         tap.previewSink = preview
         engine.setStreamSurface(tap.surface)
@@ -115,6 +118,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
         hud.recorder = recorder
         hud.prefs = prefs
         hud.audio = audio
+        hud.aids = aids
         hud.histogram = { tap.histogram }
         hud.plannedBitrate = { takes.config().bitrate }
         hud.onRecordToggle = { toggleRecord() }
@@ -222,7 +226,7 @@ class MainActivity : Activity(), RemoteServer.Listener {
 
     // ------------------------------------------------------------------ settings
     private fun openSettings(page: String?) {
-        val panel = settings ?: SettingsPanel(this, prefs, engine, object : SettingsPanel.Host {
+        val panel = settings ?: SettingsPanel(this, prefs, engine, aids, object : SettingsPanel.Host {
             override fun isRecording() = takes.active
             override fun onFormatChanged() { ui.postDelayed({ session?.emitChanged(setOf("recording_format", "cam_framerate", "cam_frame_rate_range")); hud.invalidate() }, 300) }
             override fun onAudioGainChanged(percent: Int) = setGain(percent)

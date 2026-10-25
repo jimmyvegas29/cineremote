@@ -27,12 +27,15 @@ like any other camera — live preview, manual controls, recording.
   stabilisation, front/back) and a Camera · Media · Remote · Settings rail.
 - Editors like the Blackmagic app's: rulers with AUTO, ISO preset buttons, white balance presets with a
   Kelvin ruler and lock, shutter (auto exposure) lock, a lens row with the zoom ruler, and a guides
-  toolbar (torch, safe area, frame guides 2.76:1 … 1:1, grids).
+  toolbar (torch, focus assist, safe area, frame guides 2.76:1 … 1:1, grids, zebra).
+- **Focus assist** (peaking: coloured lines or Peak glow, five colours) and **zebras** (Mid Grey, MG+1,
+  75–100%), drawn by the preview's shader: on the phone screen only, never in recordings or the stream.
 - **Settings**: Record (codec, bit rate, resolution/aspect), Camera (lock WB on record, volume-key record,
-  stabilisation), Audio (gain, stereo/mono), Monitor (guide/grid opacity, which panels show), Remote
+  stabilisation), Audio (gain, stereo/mono), Monitor (focus assist style and colour, zebra level, guide/grid
+  opacity, which panels show), Remote
   Camera Control (on/off, name, letter, password).
 
-Not done yet (Blackmagic features with no equivalent here): LUTs, zebras / focus assist / false colour,
+Not done yet (Blackmagic features with no equivalent here): LUTs, false colour, face detection,
 presets, slate metadata, timelapse and off-speed, function buttons, live streaming, chat, proxies, cloud.
 
 Verified on a Samsung Galaxy S20 FE (Android 13) against CineRemote on Windows.
@@ -71,6 +74,7 @@ compiled into the APK by the Gradle protobuf plugin.
 | `FrameTap.kt` | the camera's GPU frame tap: turns frames upright, feeds the preview, stream and histogram |
 | `AudioInput.kt` | the mic: gain, meter levels, PCM for the recorder |
 | `CameraHud.kt` | the on-phone camera screen |
+| `FocusAids.kt` | zebras + focus assist: the preview renderer's GL drawer and shader |
 | `SettingsPanel.kt` | the Settings screen |
 | `MainActivity.kt` | wiring, preview placement, media / remote |
 

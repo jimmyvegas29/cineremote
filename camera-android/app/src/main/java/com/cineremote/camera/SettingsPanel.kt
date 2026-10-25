@@ -24,7 +24,8 @@ import android.widget.Toast
  * (value + chevron, switch, slider, or a check-marked choice list on a sub-page). It writes [prefs] and tells
  * [host] about changes that need action. Only settings this app actually implements are listed.
  */
-class SettingsPanel(context: Context, private val prefs: Prefs, private val engine: CameraEngine, private val host: Host) : FrameLayout(context) {
+class SettingsPanel(context: Context, private val prefs: Prefs, private val engine: CameraEngine, private val aids: FocusAids,
+                    private val host: Host) : FrameLayout(context) {
 
     interface Host {
         fun isRecording(): Boolean
@@ -75,6 +76,17 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
             "resolution" -> resolutionPage()
             "stereo" -> choicePage("Audio", "RECORD AUDIO AS", listOf("Stereo", "Mono"), if (prefs.recordStereo) 0 else 1) {
                 prefs.recordStereo = it == 0 }
+            "focus" -> choicePage("Monitor", "FOCUS ASSIST", listOf("Off", "Colored Lines", "Peak"),
+                if (!aids.focusAssist) 0 else if (aids.peakStyle) 2 else 1) {
+                aids.focusAssist = it > 0; prefs.focusAssist = it > 0
+                if (it > 0) { aids.peakStyle = it == 2; prefs.focusAssistPeak = it == 2 }
+                host.onMonitorChanged() }
+            "focuscolor" -> FocusAids.COLORS.keys.toList().let { names ->
+                choicePage("Monitor", "FOCUS ASSIST COLOR", names, names.indexOf(aids.color)) {
+                    aids.color = names[it]; prefs.focusAssistColor = names[it]; host.onMonitorChanged() } }
+            "zebra" -> (listOf<String?>(null) + FocusAids.ZEBRA_LEVELS).let { levels ->
+                choicePage("Monitor", "ZEBRA", levels.map { it?.let(FocusAids::zebraLabel) ?: "Off" }, levels.indexOf(aids.zebra)) {
+                    aids.zebra = levels[it]; prefs.zebra = levels[it]; host.onMonitorChanged() } }
             "guides" -> choicePage("Monitor", "GUIDES OPACITY", OPACITIES.map { "$it%" }, OPACITIES.indexOf(prefs.guidesOpacity)) {
                 prefs.guidesOpacity = OPACITIES[it]; host.onMonitorChanged() }
             "grids" -> choicePage("Monitor", "GRIDS OPACITY", OPACITIES.map { "$it%" }, OPACITIES.indexOf(prefs.gridsOpacity)) {
@@ -109,6 +121,9 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         )
         section("MONITOR")
         cardOf(
+            nav("Focus Assist", if (!aids.focusAssist) "Off" else if (aids.peakStyle) "Peak" else "Colored Lines") { show("focus") },
+            nav("Focus Assist Color", aids.color) { show("focuscolor") },
+            nav("Zebra", aids.zebra?.let(FocusAids::zebraLabel) ?: "Off") { show("zebra") },
             nav("Guides Opacity", "${prefs.guidesOpacity}%") { show("guides") },
             nav("Grids Opacity", "${prefs.gridsOpacity}%") { show("grids") },
             switch("Display Audio Meters", prefs.showAudioMeters) { prefs.showAudioMeters = it; host.onMonitorChanged() },

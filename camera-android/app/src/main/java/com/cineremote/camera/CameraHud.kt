@@ -35,6 +35,7 @@ class CameraHud(context: Context) : View(context) {
     lateinit var recorder: Recorder
     lateinit var prefs: Prefs
     var audio: AudioInput? = null
+    lateinit var aids: FocusAids
     var histogram: () -> Array<FloatArray>? = { null }
     var recording: () -> Boolean = { false }
     var plannedBitrate: () -> Int = { 20_000_000 }
@@ -61,7 +62,7 @@ class CameraHud(context: Context) : View(context) {
     private var panelsOn = true
     private var expanded: Expanded? = null  // a bottom panel opened up
 
-    private enum class GuideTool { TORCH, SAFE, FRAME, GRID }
+    private enum class GuideTool { TORCH, FOCUS, SAFE, FRAME, GRID, ZEBRA }
     private enum class Grid(val label: String) { OFF("Off"), THIRDS("Thirds"), CROSS("Crosshair"), DOT("Centre dot"), THIRDS_CROSS("Thirds +") }
     private enum class Expanded { AUDIO, HISTOGRAM }
 
@@ -721,15 +722,19 @@ class CameraHud(context: Context) : View(context) {
         }
     }
 
-    // ---- guides toolbar (tool column guides button): torch, safe area, frame guides, grid
+    // ---- guides toolbar (tool column guides button): torch, focus assist, safe area, frame guides, grid, zebra
     private fun drawGuidesBar(c: Canvas) {
         editorRect = panel(c, 27f, 1828f, 790f, 1017f, alpha = 170)
-        val tools = listOfNotNull(if (engine.hasTorch) GuideTool.TORCH else null, GuideTool.SAFE, GuideTool.FRAME, GuideTool.GRID)
+        val tools = listOfNotNull(if (engine.hasTorch) GuideTool.TORCH else null, GuideTool.FOCUS, GuideTool.SAFE,
+            GuideTool.FRAME, GuideTool.GRID, GuideTool.ZEBRA)
         val w = 110 * s
         val start = x(927f) - w * tools.size / 2
         for ((i, t) in tools.withIndex()) {
             val r = RectF(start + i * w + 10 * s, y(800f), start + (i + 1) * w - 10 * s, y(870f))
-            val active = when (t) { GuideTool.TORCH -> engine.torch; GuideTool.SAFE -> safeArea > 0; GuideTool.FRAME -> frameGuide != null; GuideTool.GRID -> grid != Grid.OFF }
+            val active = when (t) {
+                GuideTool.TORCH -> engine.torch; GuideTool.FOCUS -> aids.focusAssist; GuideTool.SAFE -> safeArea > 0
+                GuideTool.FRAME -> frameGuide != null; GuideTool.GRID -> grid != Grid.OFF; GuideTool.ZEBRA -> aids.zebra != null
+            }
             if (t == guideTool && t != GuideTool.TORCH) { fillC(accent); c.drawRoundRect(r, 10 * s, 10 * s, fill) }
             drawGuideIcon(c, t, r.centerX(), r.centerY(), if (active && t != guideTool) accent else Color.WHITE)
             buttons += Btn(r) {
@@ -745,6 +750,30 @@ class CameraHud(context: Context) : View(context) {
                 drawRulerRow(c, opts.map { v -> Item("$v%", false) { safeArea = v } }, cur, left, right, "SAFE AREA")
                 chip(c, offR, "OFF", safeArea == 0); buttons += Btn(offR) { safeArea = 0; invalidate() }
             }
+            GuideTool.FOCUS -> {
+                // style buttons, then colour swatches (colour applies to Colored Lines)
+                val styles = listOf(Item("Colored Lines", aids.focusAssist && !aids.peakStyle) { setFocusAssist(true, peak = false) },
+                    Item("Peak", aids.focusAssist && aids.peakStyle) { setFocusAssist(true, peak = true) })
+                presetRow(c, styles, left, left + 520 * s, 925f, 982f)
+                val sw = 64 * s
+                var sx = left + 580 * s
+                for ((name, rgb) in FocusAids.COLORS) {
+                    val r = RectF(sx, y(925f), sx + 57 * s, y(982f))
+                    val col = Color.rgb((rgb[0] * 255).toInt(), (rgb[1] * 255).toInt(), (rgb[2] * 255).toInt())
+                    fillC(col); c.drawCircle(r.centerX(), r.centerY(), 20 * s, fill)
+                    strokeC(if (aids.color == name) accent else Color.argb(150, 255, 255, 255), (if (aids.color == name) 4f else 2f) * s)
+                    c.drawCircle(r.centerX(), r.centerY(), 25 * s, stroke)
+                    buttons += Btn(r) { aids.color = name; prefs.focusAssistColor = name; setFocusAssist(true, peak = false) }
+                    sx += sw + 16 * s
+                }
+                chip(c, offR, "OFF", !aids.focusAssist); buttons += Btn(offR) { setFocusAssist(false, aids.peakStyle) }
+            }
+            GuideTool.ZEBRA -> {
+                val opts = FocusAids.ZEBRA_LEVELS
+                val cur = opts.indexOf(aids.zebra).let { if (it < 0) opts.indexOf("95") else it }
+                drawRulerRow(c, opts.map { z -> Item(FocusAids.zebraLabel(z), false) { setZebra(z) } }, cur, left, right, "ZEBRA")
+                chip(c, offR, "OFF", aids.zebra == null); buttons += Btn(offR) { setZebra(null) }
+            }
             GuideTool.FRAME -> {
                 val opts = GUIDE_RATIOS.keys.toList()
                 val cur = opts.indexOf(frameGuide).let { if (it < 0) opts.indexOf("2.39:1") else it }
@@ -759,8 +788,30 @@ class CameraHud(context: Context) : View(context) {
         }
     }
 
+    private fun setFocusAssist(on: Boolean, peak: Boolean) {
+        aids.focusAssist = on; aids.peakStyle = peak
+        prefs.focusAssist = on; prefs.focusAssistPeak = peak
+        invalidate()
+    }
+
+    private fun setZebra(z: String?) { aids.zebra = z; prefs.zebra = z; invalidate() }
+
     private fun drawGuideIcon(c: Canvas, t: GuideTool, cx: Float, cy: Float, color: Int) {
         when (t) {
+            GuideTool.FOCUS -> {
+                // a picture with a sharp mountain outline
+                strokeC(color, 3 * s); c.drawRoundRect(RectF(cx - 24 * s, cy - 17 * s, cx + 24 * s, cy + 17 * s), 5 * s, 5 * s, stroke)
+                path.reset(); path.moveTo(cx - 20 * s, cy + 12 * s); path.lineTo(cx - 8 * s, cy - 4 * s); path.lineTo(cx, cy + 5 * s)
+                path.lineTo(cx + 8 * s, cy - 8 * s); path.lineTo(cx + 20 * s, cy + 12 * s)
+                c.drawPath(path, stroke)
+            }
+            GuideTool.ZEBRA -> {
+                strokeC(color, 3 * s); c.drawCircle(cx, cy, 19 * s, stroke)
+                c.save(); path.reset(); path.addCircle(cx, cy, 19 * s, Path.Direction.CW); c.clipPath(path)
+                strokeC(color, 2.5f * s)
+                for (i in -3..3) c.drawLine(cx + i * 9 * s - 20 * s, cy + 20 * s, cx + i * 9 * s + 20 * s, cy - 20 * s, stroke)
+                c.restore()
+            }
             GuideTool.TORCH -> drawBolt(c, cx, cy, color, 0.8f * u)
             GuideTool.SAFE -> {
                 strokeC(color, 3 * s); c.drawRect(cx - 24 * s, cy - 16 * s, cx + 24 * s, cy + 16 * s, stroke)
