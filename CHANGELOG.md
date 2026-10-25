@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.6
+
+- **Tap to focus now focuses where you click.** With the phone in landscape (either way up), clicking the
+  picture to set focus/exposure put the point a quarter-turn away from where you clicked - only the centre
+  of the frame worked. Fixed for Blackmagic Camera on both Android and iPhone (checked on a Pixel 10 and an
+  iPhone 16); portrait is unchanged.
+- New in the repository: **CineRemote Camera**, an Android app that turns phones without Blackmagic Camera
+  support into cameras CineRemote can find and control (`camera-android/`, build it from source).
+
 ## 1.1.5
 
 - **macOS:** the app is now signed with a stable CineRemote certificate instead of a throwaway signature that
