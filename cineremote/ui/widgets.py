@@ -678,18 +678,24 @@ class HMeter(QWidget):
             p.drawText(QRectF(x - 16, 42, 32, 12), Qt.AlignCenter, str(db))
 
 
-# ---------------------------------------------------------------------------- knob / record
-class Knob(QWidget):
-    """Rotary gain control, -60..+12 dB (-60 shows as -inf). Drag up/down or scroll; double-click = 0 dB."""
+# ---------------------------------------------------------------------------- gain slider / record
+class GainSlider(QWidget):
+    """Horizontal gain control, -60..+12 dB (-60 shows as -inf), easy on a touchpad: click or drag anywhere
+    on the track, scroll or use the arrow keys for 0.5 dB steps; double-click = 0 dB."""
     changed = Signal(float)
     LO, HI = -60.0, 12.0
+    MARKS = (-60, -40, -20, -12, -6, 0, 6, 12)
+    LABELS = (-60, -40, -20, -12, 0, 12)      # -6 / +6 get a tick only (too close to label)
+    PAD = 11                 # track inset = handle radius, so the ends stay reachable
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.value = 0.0
-        self.setFixedSize(78, 78)
-        self.setCursor(Qt.SizeVerCursor)
-        self._drag = None
+        self.setFixedHeight(46)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFocusPolicy(Qt.WheelFocus)
+        self.setCursor(Qt.PointingHandCursor)
+        self._drag = False
 
     def set_value(self, v, emit=False):
         v = max(self.LO, min(self.HI, round(v * 2) / 2))
@@ -699,46 +705,61 @@ class Knob(QWidget):
             if emit:
                 self.changed.emit(v)
 
+    def _x(self, v):
+        w = self.width() - 2 * self.PAD
+        return self.PAD + w * (v - self.LO) / (self.HI - self.LO)
+
+    def _value_at(self, x):
+        w = max(1, self.width() - 2 * self.PAD)
+        return self.LO + (x - self.PAD) / w * (self.HI - self.LO)
+
     def mousePressEvent(self, e):
-        self._drag = (e.position().y(), self.value)
+        if e.button() == Qt.LeftButton:
+            self._drag = True
+            self.set_value(self._value_at(e.position().x()), emit=True)
 
     def mouseMoveEvent(self, e):
         if self._drag:
-            y0, v0 = self._drag
-            self.set_value(v0 + (y0 - e.position().y()) * 0.25, emit=True)
+            self.set_value(self._value_at(e.position().x()), emit=True)
 
     def mouseReleaseEvent(self, e):
-        self._drag = None
+        self._drag = False
 
     def mouseDoubleClickEvent(self, e):
         self.set_value(0.0, emit=True)
 
     def wheelEvent(self, e):
-        d = e.angleDelta().y()
+        d = e.angleDelta().y() or e.angleDelta().x()
         if d:
             self.set_value(self.value + 0.5 * max(1, abs(d) // 120) * (1 if d > 0 else -1), emit=True)
+
+    def keyPressEvent(self, e):
+        step = {Qt.Key_Left: -0.5, Qt.Key_Down: -0.5, Qt.Key_Right: 0.5, Qt.Key_Up: 0.5}.get(e.key())
+        if step is None:
+            super().keyPressEvent(e)
+        else:
+            self.set_value(self.value + step * (6 if e.modifiers() & Qt.ShiftModifier else 1), emit=True)
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(4, 4, self.width() - 8, self.height() - 8)
-        frac = (self.value - self.LO) / (self.HI - self.LO)
-        p.setPen(QPen(T.BG3, 6, Qt.SolidLine, Qt.RoundCap))
-        p.drawArc(r, 225 * 16, -270 * 16)
-        p.setPen(QPen(T.ACCENT, 6, Qt.SolidLine, Qt.RoundCap))
-        p.drawArc(r, 225 * 16, int(-270 * frac * 16))
-        inner = r.adjusted(9, 9, -9, -9)
-        g = QLinearGradient(inner.topLeft(), inner.bottomRight())
-        g.setColorAt(0, QColor("#3a404a"))
-        g.setColorAt(1, QColor("#1b1e23"))
-        p.setPen(Qt.NoPen)
-        p.setBrush(g)
-        p.drawEllipse(inner)
-        ang = math.radians(225 - 270 * frac)
-        c = inner.center()
-        p.setPen(QPen(QColor("white"), 3, Qt.SolidLine, Qt.RoundCap))
-        p.drawLine(QPointF(c.x() + math.cos(ang) * 10, c.y() - math.sin(ang) * 10),
-                   QPointF(c.x() + math.cos(ang) * (inner.width() / 2 - 5), c.y() - math.sin(ang) * (inner.width() / 2 - 5)))
+        cy = 14.0
+        x0, x1, xv = self._x(self.LO), self._x(self.HI), self._x(self.value)
+        T.rounded(p, QRectF(x0, cy - 3, x1 - x0, 6), 3, T.BG3)
+        z = self._x(0)
+        T.rounded(p, QRectF(min(z, xv), cy - 3, abs(xv - z), 6), 3, T.ACCENT)    # fill from 0 dB
+        p.setFont(T.num_font(10.5, QFont.Medium))
+        for m in self.MARKS:
+            x = self._x(m)
+            p.setPen(QPen(QColor(255, 255, 255, 150 if m == 0 else 70), 1))
+            p.drawLine(QPointF(x, cy + 7), QPointF(x, cy + 11))
+            if m not in self.LABELS:
+                continue
+            p.setPen(T.TEXT2 if m == 0 else T.TEXT3)
+            p.drawText(QRectF(x - 20, cy + 13, 40, 16), Qt.AlignCenter, "-∞" if m <= self.LO else f"{m:+d}" if m else "0")
+        p.setPen(QPen(T.ACCENT if self.hasFocus() else QColor(0, 0, 0, 90), 1.5))
+        p.setBrush(QColor("white"))
+        p.drawEllipse(QPointF(xv, cy), 8, 8)
 
 
 class RecordButton(QAbstractButton):
@@ -784,10 +805,21 @@ class Popover(QFrame):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
     closed = Signal()
+    _anchor, _hidden_at = None, 0.0
 
     def hideEvent(self, e):
         super().hideEvent(e)
+        self._hidden_at = time.monotonic()
         self.closed.emit()
+
+    def toggle_near(self, widget, where="below", gap=8):
+        """Open next to widget; a click on that same widget while open closes it. (The click outside closes
+        the popup first and Qt then hands the same click to the widget - that one must not reopen it.)"""
+        if self.isVisible():
+            self.hide()
+        elif not (widget is self._anchor and time.monotonic() - self._hidden_at < 0.3):
+            self._anchor = widget
+            self.show_near(widget, where, gap)
 
     def show_near(self, widget, where="below", gap=8):
         self.adjustSize()

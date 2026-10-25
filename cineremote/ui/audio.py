@@ -7,13 +7,13 @@ from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget
 
 from . import theme as T
-from .widgets import Knob, Popover
+from .widgets import GainSlider, Popover
 
 
 def gain_text(db, mute=False):
     if mute:
         return "MUTED"
-    if db <= Knob.LO:
+    if db <= GainSlider.LO:
         return "-∞ dB"
     return f"{db:+.1f} dB" if db else "0.0 dB"
 
@@ -127,20 +127,21 @@ class AudioPanel(QWidget):
         hdr.addWidget(self.src, 1)
         lay.addLayout(hdr)
         row = QHBoxLayout()
-        self.knob = Knob()
-        self.knob.changed.connect(self._gain)
-        row.addWidget(self.knob)
-        col = QVBoxLayout()
         cap = QLabel("Level sent to OBS")
         cap.setStyleSheet(f"color: {T.TEXT2.name()}; font-size: 12px; font-weight: 600;")
         self.val = QLabel("0.0 dB")
-        self.val.setFont(T.num_font(30))
-        hint = QLabel("drag or scroll · double-click = 0 dB")
-        hint.setStyleSheet(f"color: {T.TEXT3.name()}; font-size: 11px;")
-        for w in (cap, self.val, hint):
-            col.addWidget(w)
-        row.addLayout(col, 1)
+        self.val.setFont(T.num_font(26))
+        self.val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.val.setMinimumWidth(T.text_width(self.val.font(), "-60.0 dB") + 8)
+        row.addWidget(cap, 1, Qt.AlignBottom)
+        row.addWidget(self.val, 0, Qt.AlignBottom)
         lay.addLayout(row)
+        self.gain = GainSlider()
+        self.gain.changed.connect(self._gain)
+        lay.addWidget(self.gain)
+        hint = QLabel("click or drag · scroll or ← → for 0.5 dB · double-click = 0 dB")
+        hint.setStyleSheet(f"color: {T.TEXT3.name()}; font-size: 11px;")
+        lay.addWidget(hint)
         btns = QHBoxLayout()
         btns.setSpacing(6)
         self.b_mute = QPushButton("Mute")
@@ -183,9 +184,9 @@ class AudioPanel(QWidget):
         src = h.props.get("audio_source")
         self.src.setText(f"{src.active_source_name or 'Phone mic'} · {src.num_of_channels or 2} ch · 48 kHz" if src
                          else "Phone mic · 48 kHz")
-        for w, v in ((self.knob, None), (self.b_mute, h.audio_mute), (self.b_listen, self.monitor.listening(key))):
+        for w, v in ((self.gain, None), (self.b_mute, h.audio_mute), (self.b_listen, self.monitor.listening(key))):
             w.blockSignals(True)
-            if w is self.knob:
+            if w is self.gain:
                 w.set_value(h.audio_gain_db)
             else:
                 w.setChecked(bool(v))

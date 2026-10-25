@@ -415,8 +415,9 @@ class MainWindow(QMainWindow):
     def open_audio(self, anchor, where):
         if not self.current:
             return
-        self.audio_pop.panel.bind(self.current)
-        self.audio_pop.show_near(anchor, where)
+        if not self.audio_pop.isVisible():
+            self.audio_pop.panel.bind(self.current)
+        self.audio_pop.toggle_near(anchor, where)
 
     def _reset_peaks(self):
         self.studio.reset_peaks()
