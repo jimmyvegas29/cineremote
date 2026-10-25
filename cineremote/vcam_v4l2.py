@@ -106,7 +106,7 @@ class V4l2Writer:
     def _write(self, frame):
         sc = min(WIDTH / frame.width, HEIGHT / frame.height)
         tw, th = max(2, int(frame.width * sc) & ~1), max(2, int(frame.height * sc) & ~1)
-        f = self._reformatter.reformat(frame, width=tw, height=th, format="yuv420p")
+        f = self._reformatter.reformat(frame, width=tw, height=th, format="yuv420p", threads=1)  # threaded: seam marks
         x0, y0 = ((WIDTH - tw) // 2) & ~1, ((HEIGHT - th) // 2) & ~1
         if self._geom != (tw, th):
             self._buf[:WIDTH * HEIGHT] = 16

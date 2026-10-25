@@ -212,7 +212,7 @@ class VcamWriter:
         scale = min(WIDTH / fw, HEIGHT / fh)
         tw = max(2, int(fw * scale) & ~1)
         th = max(2, int(fh * scale) & ~1)
-        nv = self._reformatter.reformat(frame, width=tw, height=th, format="nv12")
+        nv = self._reformatter.reformat(frame, width=tw, height=th, format="nv12", threads=1)  # threaded: seam marks
         y_src = np.frombuffer(nv.planes[0], np.uint8).reshape(-1, nv.planes[0].line_size)[:th, :tw]
         uv_src = np.frombuffer(nv.planes[1], np.uint8).reshape(-1, nv.planes[1].line_size)[:th // 2, :tw]
         # Never write the published buffer or the one the camera service is copying right now.

@@ -251,7 +251,8 @@ class VideoView(QWidget):
         tw, th = max(2, int(fr.width * scale) & ~1), max(2, int(fr.height * scale) & ~1)
         a = self.analysis
         try:
-            out = self._reformatter.reformat(fr, width=tw, height=th, format="bgra")
+            # threads=1: FFmpeg's slice-threaded scaler leaves marks in the left columns at every slice seam
+            out = self._reformatter.reformat(fr, width=tw, height=th, format="bgra", threads=1)
             plane = out.planes[0]
             ls = plane.line_size
             bgra_u8 = None
@@ -260,7 +261,8 @@ class VideoView(QWidget):
                 if a.histogram:
                     a.update_hist(bgra_u8)
             if a.any_pixels():
-                luma = np.ascontiguousarray(self._gray.reformat(fr, width=tw, height=th, format="gray").to_ndarray())
+                luma = np.ascontiguousarray(
+                    self._gray.reformat(fr, width=tw, height=th, format="gray", threads=1).to_ndarray())
                 kind, pix = a.render(bgra_u8.view(np.uint32), luma)
                 if kind == "indexed":
                     img = QImage(pix.data, tw, th, pix.strides[0], QImage.Format_Indexed8)
@@ -541,7 +543,7 @@ class ThumbSource:
             tw, th = max(2, int(fr.width * sc) & ~1), max(2, int(fr.height * sc) & ~1)
             try:
                 rgb = self._reformatter.reformat(fr, width=tw, height=th, format="rgb24",
-                                                 interpolation="FAST_BILINEAR")
+                                                 interpolation="FAST_BILINEAR", threads=1)
                 arr = np.ascontiguousarray(rgb.to_ndarray())
                 self._img = QImage(arr.data, tw, th, arr.strides[0], QImage.Format_RGB888).copy()
             except Exception:

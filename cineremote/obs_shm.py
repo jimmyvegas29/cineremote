@@ -229,11 +229,11 @@ class ShmPublisher:
         if self._closed:
             return
         if frame.format.name != "yuv420p":
-            frame = self._reformatter.reformat(frame, format="yuv420p")
+            frame = self._reformatter.reformat(frame, format="yuv420p", threads=1)   # see VideoView
         w, h = frame.width, frame.height
         if w * h > MAX_PIXELS:
             s = (MAX_PIXELS / (w * h)) ** 0.5
-            frame = self._reformatter.reformat(frame, width=int(w * s) & ~1, height=int(h * s) & ~1)
+            frame = self._reformatter.reformat(frame, width=int(w * s) & ~1, height=int(h * s) & ~1, threads=1)
             w, h = frame.width, frame.height
         idx = (self._vidx + 1) % 3
         base = HEADER_SIZE + AUDIO_BYTES + idx * VIDEO_BUF_SIZE
