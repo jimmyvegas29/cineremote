@@ -358,8 +358,10 @@ class CameraController(
         }
         Property.ValueCase.CAM_LIGHT -> { engine.torch = prop.camLight.isEnabled; engine.apply(); "cam_light" }
         Property.ValueCase.CAM_POINT_OF_INTEREST -> {
+            // Blackmagic's Android convention (which CineRemote sends to Android cameras): the point is a
+            // quarter-turn from the landscape picture, (1 - y, x). Turn it back into picture coordinates.
             val pt = prop.camPointOfInterest.point
-            engine.tapFocus(pt.x, pt.y); "cam_focus"
+            engine.tapFocus(pt.y, 1f - pt.x); "cam_focus"
         }
         Property.ValueCase.SLATE -> {
             val s = prop.slate
