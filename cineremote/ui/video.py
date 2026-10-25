@@ -9,7 +9,7 @@ import time
 import numpy as np
 from av.video.reformatter import VideoReformatter
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from . import model as M
@@ -453,22 +453,16 @@ class VideoView(QWidget):
             t = "● REC " + M.timecode(h)[3:8]
             w = T.text_width(T.ui_font(11.5, QFont.DemiBold), t) + 18
             T.chip(p, right - w, y, t, h=22, font=T.ui_font(11.5, QFont.DemiBold), fill=T.REC, border=None)
-        # bottom readout band
+        # bottom readout straight on the picture, with a soft shadow so it reads on bright shots
         band = QRectF(r.left(), r.bottom() - 54, r.width(), 54)
-        lg = QLinearGradient(0, band.top(), 0, band.bottom())
-        lg.setColorAt(0, QColor(0, 0, 0, 0))
-        lg.setColorAt(1, QColor(0, 0, 0, 200))
-        p.fillRect(band, lg)
         bx = r.left() + 10
         for key, lab in (("fps", "FPS"), ("shutter", "Shutter"), ("iso", "ISO"), ("wb", "WB"), ("lens", "Lens")):
             st = M.BY_KEY[key].state(h)
             p.setFont(T.label_font(9))
-            p.setPen(QColor("#d6dae0"))
-            p.drawText(QRectF(bx, band.bottom() - 36, 80, 12), Qt.AlignLeft, lab)
+            _shadow_text(p, QRectF(bx, band.bottom() - 36, 80, 12), Qt.AlignLeft, lab, QColor("#d6dae0"))
             nf = T.num_font(17)
             p.setFont(nf)
-            p.setPen(T.TEXT)
-            p.drawText(QRectF(bx, band.bottom() - 24, 120, 20), Qt.AlignLeft | Qt.AlignVCenter, st.text)
+            _shadow_text(p, QRectF(bx, band.bottom() - 24, 120, 20), Qt.AlignLeft | Qt.AlignVCenter, st.text, T.TEXT)
             bx += max(T.text_width(nf, st.text), T.text_width(T.label_font(9), lab)) + 14
             if bx > r.right() - 60:
                 break
@@ -486,6 +480,18 @@ class VideoView(QWidget):
                 if frac > z0:
                     lit = min(frac, z1)
                     p.fillRect(QRectF(x, bot - lit * span, 5, (lit - z0) * span), col)
+
+
+_SHADOW_OFFSETS = [(dx, dy) for dx in (-1.5, 0, 1.5) for dy in (-1, 0.5, 2) if (dx, dy) != (0, 0.5)]
+
+
+def _shadow_text(p, rect, flags, text, color):
+    """Text with a soft dark halo (the same text drawn faintly around it, slightly lower)."""
+    p.setPen(QColor(0, 0, 0, 70))
+    for dx, dy in _SHADOW_OFFSETS:
+        p.drawText(rect.translated(dx, dy), flags, text)
+    p.setPen(color)
+    p.drawText(rect, flags, text)
 
 
 def hist_pixmap(hist, w, h, dpr=1.0, title=None):
