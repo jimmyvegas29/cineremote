@@ -118,13 +118,14 @@ class VideoView(QWidget):
     tapped = Signal(float, float)
     clicked = Signal(str)
     doubleClicked = Signal(str)
-    expandRequested = Signal(str)       # tile: the expand icon in its corner
+    expandRequested = Signal(str)       # tile: the enlarge / back-to-grid icon in its corner
 
     def __init__(self, backend, key=None, mode="studio", parent=None):
         super().__init__(parent)
         self.backend, self.key, self.mode = backend, key, mode
         self.analysis = Analysis()
         self.selected = False
+        self.expanded = False                   # tile: enlarged to fill the multiview
         self._img = None
         self._img_rect = QRect()
         self._seq = -1
@@ -142,7 +143,7 @@ class VideoView(QWidget):
         if mode == "studio":
             self._make_toggles()
         elif mode == "tile":
-            self.setToolTip("Click to select · double-click to set the focus point · corner icon to open")
+            self.setToolTip("Click to select · double-click to set the focus point · corner icon to enlarge / back to the grid")
         # Frames are pushed: the backend signals each new frame, so nothing waits on a poll interval.
         # The slow timer only covers "no video" states and the fading focus reticle.
         backend.frameReady.connect(self._on_frame)
@@ -427,9 +428,15 @@ class VideoView(QWidget):
         T.chip(p, x + 28, y, M.short_name(h), h=22, font=T.ui_font(11.5, QFont.DemiBold))
         ex = self._expand_rect()
         T.rounded(p, ex, 6, QColor(0, 0, 0, 90), QColor(255, 255, 255, 40))
-        p.setPen(QColor(255, 255, 255, 170))
-        p.setFont(T.icon_font(13))
-        p.drawText(ex, Qt.AlignCenter, T.IC_FULLSCREEN)
+        # enlarge: arrows out to the corners; back to the grid: arrows in to the middle
+        p.setPen(QPen(QColor(255, 255, 255, 180), 1.6, Qt.SolidLine, Qt.RoundCap))
+        c, d, k = ex.center(), ex.width() / 2 - 7, 4.0
+        for sx, sy in ((1, -1), (-1, 1)):
+            outer, inner = QPointF(c.x() + sx * d, c.y() + sy * d), QPointF(c.x() + sx * 1.5, c.y() + sy * 1.5)
+            tip, back = (inner, 1) if self.expanded else (outer, -1)
+            p.drawLine(outer, inner)
+            p.drawLine(tip, QPointF(tip.x() + back * sx * k, tip.y()))
+            p.drawLine(tip, QPointF(tip.x(), tip.y() + back * sy * k))
         right = ex.left() - 6
         b = M.battery_pct(h)
         if b is not None:

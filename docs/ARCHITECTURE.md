@@ -161,7 +161,7 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
   ruler drags to one command per method every 120 ms (newest wins).
 - **Studio view** (`ui/studio.py`): `CameraCard`s (live thumbnail, tally, battery/media, green record-arm ring,
   multiview toggle, preview switch), monitor (`VideoView`), multiview grid (cameras whose card toggle is on;
-  tile click = select, double-click = focus point, corner icon = open single), vertical audio meter, control
+  tile click = select, double-click = focus point, corner icon = enlarge in place / back to the grid via `MultiGrid.expanded`), vertical audio meter, control
   deck (`ParamTile`s + record button; the open tile shows a `ScrubRuler`, or a `ChipStrip` for <= 9 fixed
   choices; clicking the open tile closes the row and the deck shrinks to `Deck.SHORT`).
 - **Camera view** (`ui/camera_view.py`): the phone app's layout; overlay panels are `CachedPanel`s

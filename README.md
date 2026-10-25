@@ -136,7 +136,7 @@ Do this once on every phone:
    value on it. Settings with a few fixed values (lens, frame rate) show buttons instead. **Auto** hands that
    setting back to the phone. Click the tile again to close it and give the picture more room.
 4. Click anywhere on the picture to set the focus and exposure point (in the multiview: double-click a camera's
-   picture; its corner icon opens that camera on its own).
+   picture; its corner icon enlarges that camera inside the multiview and takes you back to the grid).
    The grid icon on a camera card chooses whether that camera appears in the multiview.
 5. Press the big record button to record on the selected phone, or **Record all** to roll every camera together.
    To roll only some of them, click the **ring** on those cameras' cards to arm them (it turns green): the top button

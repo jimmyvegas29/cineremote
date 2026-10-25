@@ -190,11 +190,6 @@ class MainWindow(QMainWindow):
         if self.top.multi.isChecked():
             self.studio.multi.rebuild(self._multiview_keys())
 
-    def open_single(self, key):
-        self.select_key(key)
-        if self.top.multi.isChecked():
-            self.top.multi.setChecked(False)
-
     def _toggle_fullscreen(self):
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
 

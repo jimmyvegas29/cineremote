@@ -370,6 +370,7 @@ class MultiGrid(QWidget):
         self.grid.setContentsMargins(12, 12, 12, 12)
         self.grid.setSpacing(10)
         self.tiles = []
+        self.expanded = None             # key of the camera enlarged to fill the multiview
         self.empty = QLabel("No cameras in the multiview.\nTurn on the grid icon on a camera card.")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setStyleSheet(f"color: {T.TEXT3.name()}; font-size: 13px;")
@@ -377,7 +378,10 @@ class MultiGrid(QWidget):
 
     def rebuild(self, keys):
         self.empty.setVisible(not keys)
+        if self.expanded not in keys:
+            self.expanded = None
         if [t.key for t in self.tiles] == list(keys):
+            self._apply_expanded()
             self.set_current(self.win.current)
             return
         for t in self.tiles:
@@ -389,11 +393,25 @@ class MultiGrid(QWidget):
         for i, k in enumerate(keys):
             t = VideoView(self.win.backend, k, mode="tile")
             t.clicked.connect(self.win.select_key)
-            t.expandRequested.connect(self.win.open_single)
+            t.expandRequested.connect(self.toggle_expanded)
             t.tapped.connect(lambda x, y, k=k: self._focus(k, x, y))
             self.grid.addWidget(t, i // cols, i % cols)
             self.tiles.append(t)
+        self._apply_expanded()
         self.set_current(self.win.current)
+
+    def toggle_expanded(self, key):
+        """Enlarge one camera inside the multiview; its corner icon then takes you back to the grid."""
+        self.expanded = None if self.expanded == key else key
+        if self.expanded and self.win.current != key:
+            self.win.select_key(key)
+        self._apply_expanded()
+
+    def _apply_expanded(self):
+        for t in self.tiles:
+            t.expanded = t.key == self.expanded
+            t.setVisible(self.expanded is None or t.expanded)
+            t.update()
 
     def _focus(self, key, x, y):
         if self.win.current != key:
@@ -642,6 +660,7 @@ class StudioView(QWidget):
     def set_multiview(self, on, keys=()):
         self.stack.setCurrentIndex(1 if on else 0)
         if on:
+            self.multi.expanded = None           # always come back to the whole grid
             self.multi.rebuild(keys)
 
     def reset_peaks(self):
