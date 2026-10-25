@@ -481,7 +481,8 @@ class CameraHud(context: Context) : View(context) {
             "ZEBRA" -> setZebra(if (aids.zebra == null) prefs.str("last_zebra", "95") else null)
             "FALSE" -> aids.falseColor = !aids.falseColor
             "FACE" -> engine.setFaceDetect(!engine.faceDetect)
-            "LUT" -> if (prefs.lut != null) onLutChanged(null) else onLutChanged(prefs.str("last_lut", Luts.BUILT_IN.first()))
+            "LUT" -> if (prefs.lut != null) onLutChanged(null)
+                     else onLutChanged(prefs.str("last_lut").takeIf { it in Luts.names(context) } ?: Luts.BUILT_IN.first())
             "GUIDES" -> frameGuide = if (frameGuide == null) "2.39:1" else null
             "GRID" -> grid = if (grid == Grid.OFF) Grid.THIRDS else Grid.OFF
             "STAB" -> { engine.stabilization = !engine.stabilization; changed() }
