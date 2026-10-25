@@ -33,7 +33,7 @@ class Slate(private val prefs: Prefs) {
 
     /** File name for the next clip: camera letter + reel, date/time, clip number. */
     fun nextFileName(): String {
-        val letter = prefs.slate.ifBlank { "A" }.take(1)
+        val letter = prefs.slate.ifBlank { "A" }.take(1).uppercase()     // first letter of the camera name
         return "%s%03d_%s_C%03d.mp4".format(letter, reel, SimpleDateFormat("MMddHHmm", Locale.US).format(Date()), clip)
     }
 

@@ -19,7 +19,7 @@ class Prefs(context: Context) {
     /** Camera letter shown in CineRemote ("A", "B", ...). */
     var slate: String
         get() = sp.getString("slate", null) ?: "C"
-        set(v) = sp.edit().putString("slate", v.trim().take(2).uppercase()).apply()
+        set(v) = sp.edit().putString("slate", v.trim().take(20)).apply()     // the whole camera name
 
     var password: String
         get() = sp.getString("password", null) ?: DEFAULT_PASSWORD

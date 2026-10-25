@@ -392,13 +392,14 @@ class VideoView(QWidget):
         x = r.left() + 12
         y = r.top() + 12
         f = T.ui_font(12, QFont.DemiBold)
-        name = M.short_name(h)
-        w = T.text_width(f, name) + 18 + 22
+        name, tag = M.short_name(h), M.slate_name(h) or "•"
+        bw = max(16, T.text_width(T.ui_font(8, QFont.ExtraBold), tag) + 9.6)    # the badge's own fit width
+        w = T.text_width(f, name) + bw + 24
         T.rounded(p, QRectF(x, y, w, 26), 6, QColor(0, 0, 0, 150), T.LINE2)
-        T.slate_badge(p, x + 6, y + 5, M.slate_letter(h), 16)
+        T.slate_badge(p, x + 6, y + 5, tag, 16, fit=True)
         p.setPen(T.TEXT)
         p.setFont(f)
-        p.drawText(QRectF(x + 28, y, w - 28, 26), Qt.AlignVCenter, name)
+        p.drawText(QRectF(x + bw + 12, y, w - bw - 12, 26), Qt.AlignVCenter, name)
         fmt = M.video_format(h)
         if fmt:
             T.chip(p, x + w + 6, y, fmt, color=T.TEXT2, h=26)
@@ -430,8 +431,8 @@ class VideoView(QWidget):
             p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(r.adjusted(1.25, 1.25, -1.25, -1.25), 6, 6)
         x, y = r.left() + 10, r.top() + 10
-        T.slate_badge(p, x, y, M.slate_letter(h), 22)
-        T.chip(p, x + 28, y, M.short_name(h), h=22, font=T.ui_font(11.5, QFont.DemiBold))
+        bw = T.slate_badge(p, x, y, M.slate_name(h) or "•", 22, fit=True)
+        T.chip(p, x + bw + 6, y, M.short_name(h), h=22, font=T.ui_font(11.5, QFont.DemiBold))
         ex = self._expand_rect()
         T.rounded(p, ex, 6, QColor(0, 0, 0, 90), QColor(255, 255, 255, 40))
         # enlarge: arrows out to the corners; back to the grid: arrows in to the middle

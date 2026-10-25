@@ -173,7 +173,7 @@ class SettingsPanel(context: Context, private val prefs: Prefs, private val engi
         cardOf(
             switch("Remote Camera Control", prefs.remoteEnabled) { prefs.remoteEnabled = it; host.onRemoteChanged() },
             edit("Camera Name", prefs.deviceName, false) { prefs.deviceName = it; host.onRemoteChanged() },
-            edit("Camera Letter", prefs.slate, false) { prefs.slate = it; host.onRemoteChanged() },
+            edit("Camera Name", prefs.slate, false) { prefs.slate = it; host.onRemoteChanged() },
             edit("Remote Password", prefs.password, true) { if (it.isNotBlank()) { prefs.password = it; host.onRemoteChanged() } },
         )
         section("ABOUT")

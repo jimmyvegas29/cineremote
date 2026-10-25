@@ -387,12 +387,12 @@ def media(h):
 
 
 def slate_letter(h):
-    """The phone's slate/camera letter ("A") from its name "Model (A)"."""
-    if h and h.name.endswith(")") and "(" in h.name:
-        tag = h.name.rsplit("(", 1)[1][:-1]
-        if 0 < len(tag) <= 2:
-            return tag
-    return "•"
+    """The phone's slate/camera letter ("A") from its name "Model (A)", for spots with room for one or two
+    characters; a longer camera name gives its first letter."""
+    tag = slate_name(h)
+    if not tag:
+        return "•"
+    return tag if len(tag) <= 2 else tag[0].upper()
 
 
 _ASPECTS = [(16 / 9, "16:9"), (256 / 135, "17:9"), (4 / 3, "4:3"), (3 / 2, "3:2"), (2.39, "2.4:1"), (1.0, "1:1"),
