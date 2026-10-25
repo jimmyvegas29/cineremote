@@ -291,11 +291,14 @@ class HudStrip(QWidget):
 class ScrubRuler(QWidget):
     """Horizontal ruler under a fixed center marker, like the phone's dials. Drag, wheel or arrow keys
     move it. Works on a list of choices (snaps to them) or a numeric range (step-quantized).
-    changing(value) fires while dragging, committed(value) when the gesture ends."""
+    changing(value) fires while dragging, committed(value) when the gesture ends. With set_auto(True/False) an
+    AUTO segment sits at the left end (blue while auto is on); clicking it fires autoClicked."""
     changing = Signal(object)
     committed = Signal(object)
+    autoClicked = Signal()
 
     ITEM_PX = 64     # spacing between choices
+    AUTO_W = 76      # width of the AUTO segment
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -310,7 +313,23 @@ class ScrubRuler(QWidget):
         self._drag = None
         self._hold_until = 0.0       # ignore phone echoes briefly after a local change (fast wheel)
         self.hint = "drag · scroll · ← →"
+        self.auto = None             # None: no AUTO segment; else whether auto is on
         self.setEnabled(False)
+
+    def set_auto(self, on):
+        if on != self.auto:
+            self.auto = on
+            self.update()
+
+    def _auto_rect(self):
+        return QRectF(0, 0, self.AUTO_W, self.height()) if self.auto is not None else None
+
+    def _scale_rect(self):
+        """The ruler itself: the whole widget, less the AUTO segment."""
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        if self.auto is not None:
+            r.setLeft(self.AUTO_W)
+        return r
 
     # -- model
     def set_state(self, st, fmt=str, key=None):
@@ -369,7 +388,7 @@ class ScrubRuler(QWidget):
         if self.choices:
             return self.ITEM_PX
         span = max(self.hi - self.lo, self.step * 10)
-        return max(self.width(), 200) / max(span / 2.5, self.step * 24)
+        return max(self._scale_rect().width(), 200) / max(span / 2.5, self.step * 24)
 
     def _clamp(self):
         if self.choices:
@@ -394,6 +413,10 @@ class ScrubRuler(QWidget):
     # -- input
     def mousePressEvent(self, e):
         self.setFocus()
+        ar = self._auto_rect()
+        if e.button() == Qt.LeftButton and ar is not None and ar.contains(e.position()):
+            self.autoClicked.emit()
+            return
         if e.button() != Qt.LeftButton or not self.has_value:
             return
         v = self.value()
@@ -418,7 +441,7 @@ class ScrubRuler(QWidget):
         self._drag = None
         if self.choices:
             if abs(e.position().x() - x0) < 4:      # a click on a value jumps to it
-                self.pos = self.pos + (e.position().x() - self.width() / 2) / self._px_per_unit()
+                self.pos = self.pos + (e.position().x() - self._scale_rect().center().x()) / self._px_per_unit()
                 self._clamp()
             self.pos = float(round(self.pos))
         self._hold_until = time.monotonic() + 0.6
@@ -444,18 +467,25 @@ class ScrubRuler(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        T.rounded(p, r, 10, T.BG, T.LINE)
+        whole = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        T.rounded(p, whole, 10, T.BG, T.LINE)
         p.save()
         clip = QPainterPath()
-        clip.addRoundedRect(r, 10, 10)
+        clip.addRoundedRect(whole, 10, 10)
         p.setClipPath(clip)
+        ar = self._auto_rect()
+        if ar is not None:
+            self._paint_auto(p, ar)
+        r = self._scale_rect()
+        p.setClipRect(r, Qt.IntersectClip)
         cx = r.center().x()
         ppu = self._px_per_unit()
         h = r.height()
         dim = not self.isEnabled()
         tick = QColor(255, 255, 255, 60 if dim else 75)
         major = QColor(255, 255, 255, 90 if dim else 150)
+        pw = T.text_width(T.num_font(13, QFont.Bold), self._label()) + 16
+        self._pill_span = (cx - pw / 2 - 4, cx + pw / 2 + 4) if self.isEnabled() else None
         p.setFont(T.num_font(13))
         if self.choices:
             first = int(math.floor(self.pos - cx / ppu)) - 1
@@ -464,8 +494,7 @@ class ScrubRuler(QWidget):
                 x = cx + (i - self.pos) * ppu
                 p.setPen(QPen(major, 1))
                 p.drawLine(QPointF(x, h - 18), QPointF(x, h))
-                p.setPen(T.TEXT3 if dim else T.TEXT2)
-                p.drawText(QRectF(x - 40, 6, 80, 18), Qt.AlignCenter, self.choices[i][1])
+                self._tick_label(p, r, x, self.choices[i][1], dim)
                 # one tick per value: no in-between ticks for values that don't exist (ISO 500 -> 640)
         else:
             span_px = r.width()
@@ -481,8 +510,7 @@ class ScrubRuler(QWidget):
                     p.setPen(QPen(major if is_major else tick, 1))
                     p.drawLine(QPointF(x, h - (18 if is_major else 9)), QPointF(x, h))
                     if is_major:
-                        p.setPen(T.TEXT3 if dim else T.TEXT2)
-                        p.drawText(QRectF(x - 40, 6, 80, 18), Qt.AlignCenter, self.fmt(round(v, 6)))
+                        self._tick_label(p, r, x, self.fmt(round(v, 6)), dim)
                 v += mn
         g = QLinearGradient(r.left(), 0, r.right(), 0)
         bg = QColor(T.BG)
@@ -507,6 +535,31 @@ class ScrubRuler(QWidget):
             p.setPen(T.TEXT3)
             p.drawText(QRectF(r.right() - 150, h - 17, 140, 14), Qt.AlignRight | Qt.AlignVCenter, self.hint)
         p.restore()
+
+    def _tick_label(self, p, r, x, text, dim):
+        """A value label over its tick - only if it fits inside the ruler (no half-cut labels at the ends)."""
+        w = T.text_width(p.font(), text)
+        if x - w / 2 < r.left() + 6 or x + w / 2 > r.right() - 6:
+            return
+        span = getattr(self, "_pill_span", None)
+        if span and x + w / 2 > span[0] and x - w / 2 < span[1]:
+            return          # would peek out from under the value pill
+        p.setPen(T.TEXT3 if dim else T.TEXT2)
+        p.drawText(QRectF(x - 40, 6, 80, 18), Qt.AlignCenter, text)
+
+    def _paint_auto(self, p, ar):
+        """AUTO segment at the left end: glows blue with an underline while auto is on (HUD style)."""
+        if self.auto:
+            g = QLinearGradient(0, ar.top(), 0, ar.bottom())
+            g.setColorAt(0, QColor(47, 124, 246, 40))
+            g.setColorAt(1, QColor(47, 124, 246, 110))
+            p.fillRect(ar, g)
+            p.fillRect(QRectF(ar.left() + 12, ar.bottom() - 3, ar.width() - 24, 3), T.ACCENT)
+        p.setPen(QPen(QColor(255, 255, 255, 30), 1))
+        p.drawLine(QPointF(ar.right(), ar.top() + 8), QPointF(ar.right(), ar.bottom() - 8))
+        p.setFont(T.label_font(11))
+        p.setPen(QColor("white") if self.auto else (T.TEXT3 if not self.isEnabled() else T.TEXT2))
+        p.drawText(ar, Qt.AlignCenter, "AUTO")
 
 
 def _nice(x):
@@ -540,7 +593,14 @@ class ChipStrip(QWidget):
 
     def _rects(self):
         n = max(len(self.items), 1)
-        gap = 0 if self.hud else 6
+        if self.hud:
+            # only as wide as the buttons need (equal cells sized to the longest label), centred
+            f = T.num_font(self.font_px)
+            cw = max([T.text_width(f, lab) + 56 for _, lab in self.items] + [92])
+            cw = min(cw, self.width() / n)
+            x0 = (self.width() - cw * n) / 2
+            return [QRectF(x0 + i * cw, 0, cw, self.height()) for i in range(len(self.items))]
+        gap = 6
         w = (self.width() - gap * (n - 1)) / n
         return [QRectF(i * (w + gap), 0, w, self.height()) for i in range(len(self.items))]
 
@@ -567,11 +627,15 @@ class ChipStrip(QWidget):
             p.drawText(r, Qt.AlignCenter, label)
 
     def _paint_hud(self, p):
-        T.rounded(p, QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, QColor("#0b0c0e"), T.LINE)
+        rects = self._rects()
+        if not rects:
+            return
+        bar = QRectF(rects[0].left(), 0, rects[-1].right() - rects[0].left(), self.height())
+        T.rounded(p, bar.adjusted(0.5, 0.5, -0.5, -0.5), 12, QColor("#0b0c0e"), T.LINE)
         clip = QPainterPath()
-        clip.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 11, 11)
+        clip.addRoundedRect(bar.adjusted(1, 1, -1, -1), 11, 11)
         p.setClipPath(clip)
-        for i, ((v, label), r) in enumerate(zip(self.items, self._rects())):
+        for i, ((v, label), r) in enumerate(zip(self.items, rects)):
             on = v == self.current
             if on:
                 g = QLinearGradient(0, r.top(), 0, r.bottom())

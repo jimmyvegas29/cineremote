@@ -447,19 +447,12 @@ class Deck(QWidget):
         top = QHBoxLayout(self.top_row)
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(10)
-        self.r_label = QLabel("ISO")
-        self.r_label.setFont(T.label_font(15))
-        self.r_label.setFixedWidth(100)
-        self.r_label.setAlignment(Qt.AlignCenter)
-        self.r_auto_lbl = QLabel("Auto")
-        self.r_auto_lbl.setStyleSheet(f"color: {T.TEXT2.name()}; font-size: 12px; font-weight: 600;")
-        self.r_auto = Switch()
-        self.r_auto.toggled.connect(self._auto_toggled)
         self.ruler = ScrubRuler()
         self.ruler.hint = ""
         self.ruler.setToolTip("Drag, scroll or use ← → to change the value")
         self.ruler.changing.connect(lambda v: self._ruler(v, False))
         self.ruler.committed.connect(lambda v: self._ruler(v, True))
+        self.ruler.autoClicked.connect(self._auto_clicked)
         self.chips = ChipStrip(height=48, font_px=17, hud=True)
         self.chips.picked.connect(lambda v: self._ruler(v, True))
         self.presets = QWidget()
@@ -473,9 +466,6 @@ class Deck(QWidget):
             b.setFixedSize(34, 30)
             b.clicked.connect(lambda _=False, k=k: self.ctl.set_param(M.BY_KEY["wb"], k))
             pl.addWidget(b)
-        top.addWidget(self.r_label)
-        top.addWidget(self.r_auto_lbl)
-        top.addWidget(self.r_auto)
         top.addWidget(self.ruler, 1)
         top.addWidget(self.chips, 1)
         top.addWidget(self.presets)
@@ -558,8 +548,11 @@ class Deck(QWidget):
                 st.sub = "manual"
             self.tiles[self.sel].set_state(st)
 
-    def _auto_toggled(self, on):
-        if self.sel is not None:
+    def _auto_clicked(self):
+        """The ruler's AUTO segment: hand the setting to the phone, or take it back at the current value."""
+        if self.sel is not None and self.ctl.live():
+            on = not self.ruler.auto
+            self.ruler.set_auto(on)              # show it now; the phone's echo confirms
             self.ctl.set_auto(M.BY_KEY[self.sel], on)
 
     def _rec(self, checked):
@@ -576,9 +569,9 @@ class Deck(QWidget):
         if self.sel is not None:
             p = M.BY_KEY[self.sel]
             st = p.state(h) if h else M.State()
-            self.r_label.setText(p.label.upper())
             # a short list of fixed values (lenses, frame rates) is a row of buttons, not a ruler
-            buttons = st.discrete and len(st.choices) <= M.MAX_BUTTONS
+            # (not for a setting with Auto: that lives on the ruler)
+            buttons = st.discrete and len(st.choices) <= M.MAX_BUTTONS and not p.has_auto
             self.chips.setVisible(buttons)
             self.ruler.setVisible(not buttons)
             if buttons:
@@ -586,13 +579,9 @@ class Deck(QWidget):
                 self.chips.setEnabled(live and st.enabled)
             else:
                 self.ruler.set_state(st, p.fmt, key=(self.ctl.key, p.key))
-                self.ruler.setEnabled(live and st.enabled and st.value is not None and (st.discrete or st.hi > st.lo))
-            self.r_auto.setVisible(p.has_auto)
-            self.r_auto_lbl.setVisible(p.has_auto)
-            self.r_auto.blockSignals(True)
-            self.r_auto.setChecked(bool(st.auto))
-            self.r_auto.blockSignals(False)
-            self.r_auto.setEnabled(live)
+                self.ruler.set_auto(bool(st.auto) if p.has_auto else None)
+                usable = st.value is not None and (st.discrete or st.hi > st.lo)
+                self.ruler.setEnabled(live and st.enabled and (usable or p.has_auto))
             self.presets.setVisible(p.key == "wb")
         self.tc.setText(M.timecode(h))
         rec = M.recording(h)

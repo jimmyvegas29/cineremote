@@ -7,8 +7,11 @@
   an underline, and clicking it again closes it.
 - **Frame rate is buttons on Android too.** Blackmagic Camera on Android lists every whole frame rate, which
   turned FPS into a ruler; it now offers the standard rates the phone supports (24, 25, 30, 48, 50, 60...).
-- Lens and frame-rate choices use the same bar style, the name of the open setting is bigger and centred,
-  and the compact record button sits centred with its timecode.
+- **Auto is part of the ruler:** an AUTO segment at its left end (ISO, shutter, white balance, focus) turns
+  blue while the phone is in charge; click it to switch.
+- Lens and frame-rate choices use the same bar style, only as wide as they need and centred. The ruler no
+  longer shows half-cut values at its ends or under the value marker, and the compact record button sits
+  centred with its timecode.
 
 ## 1.1.8
 

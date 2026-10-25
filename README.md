@@ -133,7 +133,7 @@ Do this once on every phone:
    show up can be added with **Add camera** and its IP address.
 2. **Double-click a phone** to connect and enter its Remote Camera password (CineRemote can remember it).
 3. Click a setting in the strip at the bottom (ISO, shutter, WB…) and then drag, scroll or use ← → on the ruler above it, or click a
-   value on it. Settings with a few fixed values (lens, frame rate) show buttons instead. **Auto** hands that
+   value on it. Settings with a few fixed values (lens, frame rate) show buttons instead. **AUTO** at the left end of the ruler hands that
    setting back to the phone. Click it again to close it and give the picture more room.
 4. Click anywhere on the picture to set the focus and exposure point (in the multiview: double-click a camera's
    picture; its corner icon enlarges that camera inside the multiview and takes you back to the grid).
