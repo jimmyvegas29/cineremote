@@ -1,6 +1,6 @@
 """Studio view (concept C): camera cards, monitor with PC-side tools, vertical audio meter, control deck."""
 from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -182,8 +182,7 @@ class CameraCard(QWidget):
         name_right = self.mv.x() - 6 if self.mv.isVisible() else r.width() - 12
         nw = int(max(20, name_right - 12))
         if slate:
-            bf = T.ui_font(11, QFont.ExtraBold)
-            T.slate_badge(p, 12, y, QFontMetrics(bf).elidedText(slate, Qt.ElideRight, nw - 12), 20, fit=True)
+            T.slate_badge(p, 12, y, slate, 20, fit=True, max_w=min(T.SLATE_MAX_W, nw))
         else:
             p.setPen(T.TEXT)
             p.setFont(T.ui_font(13.5, QFont.DemiBold))

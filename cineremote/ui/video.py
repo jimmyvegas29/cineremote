@@ -393,7 +393,7 @@ class VideoView(QWidget):
         y = r.top() + 12
         f = T.ui_font(12, QFont.DemiBold)
         name, tag = M.short_name(h), M.slate_name(h) or "•"
-        bw = max(16, T.text_width(T.ui_font(8, QFont.ExtraBold), tag) + 9.6)    # the badge's own fit width
+        bw = T.slate_badge_width(tag, 16)
         w = T.text_width(f, name) + bw + 24
         T.rounded(p, QRectF(x, y, w, 26), 6, QColor(0, 0, 0, 150), T.LINE2)
         T.slate_badge(p, x + 6, y + 5, tag, 16, fit=True)

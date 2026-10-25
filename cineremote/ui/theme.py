@@ -135,10 +135,22 @@ def badge_a(p: QPainter, x, y, size=15):
     p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, "A")
 
 
-def slate_badge(p: QPainter, x, y, letter, size=20, fit=False):
-    """White slate tag; fit=True widens it to the whole text (a long slate name). Returns its width."""
+SLATE_MAX_W = 132      # a long camera name is cut off with "…" at this badge width
+
+
+def slate_badge_width(letter, size=20, max_w=SLATE_MAX_W):
+    """Width slate_badge(fit=True) will draw for this text."""
     f = ui_font(int(size * 0.55), QFont.ExtraBold)
-    w = max(size, text_width(f, letter) + size * 0.6) if fit else size
+    return min(max_w, max(size, text_width(f, letter) + size * 0.6))
+
+
+def slate_badge(p: QPainter, x, y, letter, size=20, fit=False, max_w=SLATE_MAX_W):
+    """White slate tag; fit=True widens it to the text (a long camera name), up to max_w then "…".
+    Returns its width."""
+    f = ui_font(int(size * 0.55), QFont.ExtraBold)
+    if fit:
+        letter = QFontMetrics(f).elidedText(letter, Qt.ElideRight, int(max_w - size * 0.6))
+    w = slate_badge_width(letter, size, max_w) if fit else size
     rounded(p, QRectF(x, y, w, size), size * 0.25, QColor("white"))
     p.setPen(QColor("black"))
     p.setFont(f)
