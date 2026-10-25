@@ -389,6 +389,13 @@ def slate_letter(h):
     return "•"
 
 
+def slate_name(h):
+    """The phone's whole slate/camera name ("FU", "Camera 2"), or "" if it has none."""
+    if h and h.name.endswith(")") and " (" in h.name:
+        return h.name.rsplit(" (", 1)[1][:-1]
+    return ""
+
+
 def short_name(h):
     return h.name.rsplit(" (", 1)[0] if h else ""
 

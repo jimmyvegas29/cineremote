@@ -135,11 +135,15 @@ def badge_a(p: QPainter, x, y, size=15):
     p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, "A")
 
 
-def slate_badge(p: QPainter, x, y, letter, size=20):
-    rounded(p, QRectF(x, y, size, size), size * 0.25, QColor("white"))
+def slate_badge(p: QPainter, x, y, letter, size=20, fit=False):
+    """White slate tag; fit=True widens it to the whole text (a long slate name). Returns its width."""
+    f = ui_font(int(size * 0.55), QFont.ExtraBold)
+    w = max(size, text_width(f, letter) + size * 0.6) if fit else size
+    rounded(p, QRectF(x, y, w, size), size * 0.25, QColor("white"))
     p.setPen(QColor("black"))
-    p.setFont(ui_font(int(size * 0.55), QFont.ExtraBold))
-    p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, letter)
+    p.setFont(f)
+    p.drawText(QRectF(x, y, w, size), Qt.AlignCenter, letter)
+    return w
 
 
 def apply(app):

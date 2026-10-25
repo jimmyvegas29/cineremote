@@ -1,6 +1,6 @@
 """Studio view (concept C): camera cards, monitor with PC-side tools, vertical audio meter, control deck."""
 from PySide6.QtCore import QRectF, QSettings, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -177,19 +177,22 @@ class CameraCard(QWidget):
             p.fillRect(QRectF(r.left(), r.top(), 4, r.height()), tally)
             p.restore()
         y = self._name_y()
-        letter = M.slate_letter(h)
-        T.slate_badge(p, 12, y, letter, 20)
-        # camera (slate) name, and the phone under it
-        title, phone = (f"Camera {letter}", M.short_name(h)) if letter != "•" else (M.short_name(h), "")
-        p.setPen(T.TEXT)
-        p.setFont(T.ui_font(13.5, QFont.DemiBold))
+        # the whole slate name in the badge, the phone under it (no slate: the phone's name on top)
+        slate, phone = M.slate_name(h), M.short_name(h)
         name_right = self.mv.x() - 6 if self.mv.isVisible() else r.width() - 12
-        nw = int(max(20, name_right - 39))
-        p.drawText(QRectF(39, y, nw, 20), Qt.AlignVCenter, p.fontMetrics().elidedText(title, Qt.ElideRight, nw))
+        nw = int(max(20, name_right - 12))
+        if slate:
+            bf = T.ui_font(11, QFont.ExtraBold)
+            T.slate_badge(p, 12, y, QFontMetrics(bf).elidedText(slate, Qt.ElideRight, nw - 12), 20, fit=True)
+        else:
+            p.setPen(T.TEXT)
+            p.setFont(T.ui_font(13.5, QFont.DemiBold))
+            p.drawText(QRectF(12, y, nw, 20), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, nw))
+            phone = ""
         p.setPen(T.TEXT2)
         p.setFont(T.ui_font(11.5))
-        pw = int(r.width() - 51)
-        p.drawText(QRectF(39, y + 20, pw, 18), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, pw))
+        pw = int(r.width() - 24)
+        p.drawText(QRectF(12, y + 22, pw, 18), Qt.AlignVCenter, p.fontMetrics().elidedText(phone, Qt.ElideRight, pw))
         y += 46
         if not th_h:
             wchip = T.chip(p, 12, y, status, font=cf, h=21, fill=T.REC if rec else QColor(255, 255, 255, 10),
