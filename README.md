@@ -69,7 +69,7 @@ an iPhone 16 and an iPad Pro, controlled from Windows 11, Ubuntu 24.04 and macOS
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/multiview.png" alt="Multiview of four cameras"><br><b>Multiview</b>: every connected phone at once, with recording state, battery and exposure for each.</td>
+    <td width="50%"><img src="docs/images/multiview.png" alt="Multiview of four cameras"><br><b>Multiview</b>: the phones you pick, all at once, with recording state, battery and exposure for each. Double-click one to set its focus point.</td>
     <td width="50%"><img src="docs/images/camera-view.png" alt="Camera view"><br><b>Camera view</b>: the phone app's own layout, for one camera at a time.</td>
   </tr>
   <tr>

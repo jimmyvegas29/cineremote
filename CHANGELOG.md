@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.7
+
+- **Audio meters show real stereo.** CineRemote now asks the phone for stereo audio. Without that, some
+  phones sent mono and the left and right meters (and the audio in OBS) were always identical. Blackmagic
+  Camera already sent stereo; the CineRemote Camera Android app now streams stereo too.
+- **More room for the picture.** Click a setting tile again to close its ruler: the controls shrink and the
+  video gets bigger. CineRemote remembers which tile was open.
+- **Lens and frame rate are buttons** instead of a ruler, since they only have a few fixed values. The ISO and
+  shutter rulers only show marks for values you can actually pick, and clicking a value jumps to it.
+- **Choose which cameras are in the multiview** with the new grid icon on each camera card.
+- **Multiview:** double-click a camera's picture to set its focus point; the icon in its corner opens that
+  camera on its own.
+- **Camera cards:** the record-arm ring is now green (armed is not recording), and the camera name has the
+  phone's name under it.
+
 ## 1.1.6
 
 - **Tap to focus now focuses where you click.** With the phone in landscape (either way up), clicking the
