@@ -460,7 +460,7 @@ class Deck(QWidget):
         self.ruler.setToolTip("Drag, scroll or use ← → to change the value")
         self.ruler.changing.connect(lambda v: self._ruler(v, False))
         self.ruler.committed.connect(lambda v: self._ruler(v, True))
-        self.chips = ChipStrip(height=44, font_px=16)
+        self.chips = ChipStrip(height=48, font_px=17, hud=True)
         self.chips.picked.connect(lambda v: self._ruler(v, True))
         self.presets = QWidget()
         pl = QHBoxLayout(self.presets)

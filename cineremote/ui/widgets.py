@@ -573,12 +573,13 @@ def _nice(x):
 
 # ---------------------------------------------------------------------------- chip strip
 class ChipStrip(QWidget):
-    """Row of one-click values; the current one is filled blue."""
+    """Row of one-click values; the current one is filled blue. hud=True draws it like the HUD strip: one
+    dark bar with dividers, the current value glowing with an underline."""
     picked = Signal(object)
 
-    def __init__(self, parent=None, height=36, font_px=16):
+    def __init__(self, parent=None, height=36, font_px=16, hud=False):
         super().__init__(parent)
-        self.items, self.current = [], None
+        self.items, self.current, self.hud = [], None, hud
         self.setFixedHeight(height)
         self.font_px = font_px
         self.setCursor(Qt.PointingHandCursor)
@@ -591,7 +592,7 @@ class ChipStrip(QWidget):
 
     def _rects(self):
         n = max(len(self.items), 1)
-        gap = 6
+        gap = 0 if self.hud else 6
         w = (self.width() - gap * (n - 1)) / n
         return [QRectF(i * (w + gap), 0, w, self.height()) for i in range(len(self.items))]
 
@@ -608,10 +609,32 @@ class ChipStrip(QWidget):
         p.setFont(T.num_font(self.font_px))
         if not self.isEnabled():
             p.setOpacity(0.45)
+        if self.hud:
+            self._paint_hud(p)
+            return
         for (v, label), r in zip(self.items, self._rects()):
             on = v == self.current
             T.rounded(p, r, 7, T.ACCENT if on else QColor(255, 255, 255, 16))
             p.setPen(QColor("white") if on else T.TEXT)
+            p.drawText(r, Qt.AlignCenter, label)
+
+    def _paint_hud(self, p):
+        T.rounded(p, QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, QColor("#0b0c0e"), T.LINE)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 11, 11)
+        p.setClipPath(clip)
+        for i, ((v, label), r) in enumerate(zip(self.items, self._rects())):
+            on = v == self.current
+            if on:
+                g = QLinearGradient(0, r.top(), 0, r.bottom())
+                g.setColorAt(0, QColor(47, 124, 246, 0))
+                g.setColorAt(1, QColor(47, 124, 246, 70))
+                p.fillRect(r, g)
+                p.fillRect(QRectF(r.left() + 14, r.bottom() - 3, r.width() - 28, 3), T.ACCENT)
+            if i:
+                p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+                p.drawLine(QPointF(r.left(), r.top() + 10), QPointF(r.left(), r.bottom() - 10))
+            p.setPen(QColor("white") if on else T.TEXT2)
             p.drawText(r, Qt.AlignCenter, label)
 
 
