@@ -279,11 +279,11 @@ class DemoSession:
             setattr(m, k, v)
         self._store("slate", m)
 
-    async def start_recording(self, dim_screen=False):
+    async def start_recording(self, dim_screen=False, source=""):
         self._store("recording_state", self._rec_state(start=time.time()))
         return "START_RECORDING_STATUS_OK"
 
-    async def stop_recording(self):
+    async def stop_recording(self, source=""):
         clip = time.time() - self._rec_start if self._rec_start is not None else 0.0
         self._rec_start = None
         self._store("recording_state", self._rec_state(clip=clip))

@@ -61,6 +61,7 @@ class CameraSession:
         self.remote_info = {}
         self.hello = None            # HelloResponse
         self.props = {}              # field name -> sub-message
+        self._rec_cmd = None         # "start" / "stop" while a record command waits for its answer
         self.state = "idle"
         self.preview_active = False
         self._sig = None
@@ -329,6 +330,13 @@ class CameraSession:
         if not field:
             return
         val = getattr(prop, field)
+        if field == "recording_state":
+            old = self.props.get(field)
+            now = (val.is_recording, val.is_writing_to_storage)
+            if old is None or (old.is_recording, old.is_writing_to_storage) != now:
+                log.info("record: %s: camera %s (writing to storage: %s)", self._who(),
+                         "recording" if val.is_recording else "idle",
+                         "yes" if val.is_writing_to_storage else "no")
         self.props[field] = val
         try:
             self.on_property(field, val)
@@ -536,13 +544,48 @@ class CameraSession:
         return await self.write("slate", pm.msg("SlateProperty")(**fields))
 
     # ------------------------------------------------------------------ recording
-    async def start_recording(self, dim_screen=False):
-        r = await self._request(start_recording_request=pm.msg("StartRecordingRequest")(dim_screen=dim_screen))
-        return pm.enum_name("StartRecordingStatus", r.status) if r else "NO_RESPONSE"
+    def _who(self):
+        return self.remote_info.get("device_name") or self.host
 
-    async def stop_recording(self):
-        r = await self._request(stop_recording_request=pm.msg("StopRecordingRequest")())
-        return pm.enum_name("StopRecordingStatus", r.status) if r else "NO_RESPONSE"
+    def _is_recording(self):
+        rs = self.props.get("recording_state")
+        return bool(rs and rs.is_recording)
+
+    async def start_recording(self, dim_screen=False, source=""):
+        """One start at a time, and none while the camera already records: Blackmagic Camera accepts two
+        starts that arrive together, and a second start mid-take is never what the user meant. Every
+        command and its answer is logged (doubled clips on 25/27 Oct 2026 left no trace to check)."""
+        if self._rec_cmd is not None:
+            log.info("record: %s: start (%s) ignored - %s still waiting for its answer", self._who(), source or "?",
+                     self._rec_cmd)
+            return "IGNORED_PENDING"
+        if self._is_recording():
+            log.info("record: %s: start (%s) ignored - already recording", self._who(), source or "?")
+            return "IGNORED_RECORDING"
+        return await self._rec_request("start", source, start_recording_request=pm.msg("StartRecordingRequest")(
+            dim_screen=dim_screen))
+
+    async def stop_recording(self, source=""):
+        if self._rec_cmd is not None:
+            log.info("record: %s: stop (%s) ignored - %s still waiting for its answer", self._who(), source or "?",
+                     self._rec_cmd)
+            return "IGNORED_PENDING"
+        return await self._rec_request("stop", source, stop_recording_request=pm.msg("StopRecordingRequest")())
+
+    async def _rec_request(self, what, source, **kw):
+        self._rec_cmd = what
+        t = time.monotonic()
+        log.info("record: %s: %s (%s) sent, camera %s", self._who(), what, source or "?",
+                 "recording" if self._is_recording() else "idle")
+        try:
+            r = await self._request(**kw)
+        finally:
+            self._rec_cmd = None
+        status = pm.enum_name("StartRecordingStatus" if what == "start" else "StopRecordingStatus", r.status) \
+            if r else "NO_RESPONSE"
+        log.info("record: %s: %s (%s) -> %s in %.0f ms", self._who(), what, source or "?", status,
+                 (time.monotonic() - t) * 1000)
+        return status
 
     async def pause_recording(self):
         r = await self._request(pause_recording_request=pm.msg("PauseRecordingRequest")())

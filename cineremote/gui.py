@@ -394,7 +394,7 @@ class MainWindow(QMainWindow):
     def toggle_record(self):
         h = self.ctl.h
         if h and h.session:
-            self.ctl.send("stop_recording" if M.recording(h) else "start_recording")
+            self.ctl.send("stop_recording" if M.recording(h) else "start_recording", source="record button")
 
     def record_targets(self):
         """Connected cameras the Record button starts: the armed ones, or all when none is armed."""
@@ -407,10 +407,20 @@ class MainWindow(QMainWindow):
         self.top.rec_all.set_label(f"Record armed ({len(targets)})" if armed else "Record all")
 
     def record_all(self, start):
-        """Start: the armed cameras (all, if none is armed). Stop: every camera that's recording."""
-        cams = self.record_targets()[0] if start else [(k, h) for k, h in self.backend.cams.items() if h.session]
+        """Start: the armed cameras (all, if none is armed) that aren't already recording - a second press
+        must never restart a take. Stop: every connected camera."""
+        if start:
+            targets, armed = self.record_targets()
+            cams = [(k, h) for k, h in targets if not M.recording(h)]
+            source = "Record armed" if armed else "Record all"
+            log.info("record: %s pressed - starting %d of %d cameras (%d already recording)", source, len(cams),
+                     len(targets), len(targets) - len(cams))
+        else:
+            cams = [(k, h) for k, h in self.backend.cams.items() if h.session]
+            source = "Stop all"
+            log.info("record: Stop all pressed - %d cameras", len(cams))
         for k, h in cams:
-            self.backend.call(k, "start_recording" if start else "stop_recording")
+            self.backend.call(k, "start_recording" if start else "stop_recording", source=source)
 
     def open_audio(self, anchor, where):
         if not self.current:
