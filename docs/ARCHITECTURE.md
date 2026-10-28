@@ -152,6 +152,9 @@ CPU every 5 s (`diag.py`; timestamps ride on aiortc's `JitterFrame` into `frame.
 - `_audio()` resamples to s16 stereo 48 kHz, applies the **PC-side** gain/mute (the protocol has no mic
   gain), updates RMS/peak meters, feeds OBS and the listen tap.
 - `armed` (record-arm) is per handle; `MainWindow.record_targets()` = armed live cameras, else all live.
+  `record_all(True)` skips cameras already recording. `CameraSession.start_recording/stop_recording` drop a
+  command while another is awaiting its answer, and a start while recording (Blackmagic accepts two starts
+  that arrive together); every command, answer and recording-state change is logged as `record: ...`.
 
 ## User interface
 

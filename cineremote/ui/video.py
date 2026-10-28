@@ -142,8 +142,6 @@ class VideoView(QWidget):
         self.setMouseTracking(False)
         if mode == "studio":
             self._make_toggles()
-        elif mode == "tile":
-            self.setToolTip("Click to select · double-click to set the focus point · corner icon to enlarge / back to the grid")
         # Frames are pushed: the backend signals each new frame, so nothing waits on a poll interval.
         # The slow timer only covers "no video" states and the fading focus reticle.
         backend.frameReady.connect(self._on_frame)

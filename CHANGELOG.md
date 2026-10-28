@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.11
+
+- **Safer recording starts.** Record all / Record armed now skips cameras that are already recording, and
+  CineRemote never sends a camera a second start while it's recording or while the first start is still
+  waiting for the camera's answer (Blackmagic Camera accepts two starts that arrive together).
+- **Recording is logged.** Every start and stop - which camera, which button, the camera's answer - and every
+  time a camera starts or stops recording is written to CineRemote's log, so a take that goes wrong can be
+  traced.
+- The multiview no longer shows a help tooltip when you hover over a camera.
+
 ## 1.1.10
 
 - **Recording format on each camera card:** a small badge shows what the phone is recording, like the one in
